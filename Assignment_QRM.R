@@ -74,7 +74,7 @@ cop_select = BiCopSelect(pnorm(returns$SP_500, mean = MLE$MLEmeanGaussian[1], sd
                           pnorm(returns$SMI, mean = MLE$MLEmeanGaussian[2], sd = sqrt(diag(MLE$MLEVCVGaussian))[2]),
                           familyset = 2, selectioncrit = "BIC", method = "mle")
 summary(cop_select)
-
+str(cop_select)
 
 ## t-copula (since the Gaussian Copula doesn't add enough dependence, especially in the tails).
 tCop <- tCopula(param = 0.56, dim = 2, df = 1)
@@ -90,5 +90,37 @@ plot(returns$SP_500, returns$SMI, ylab = "SMI", xlab = "SP_500")
 points(m3_sim$SP_500, m3_sim$SMI, col = "red")
 legend('bottomright',c('Observed','Simulated'),col=c('black','red'),pch=21)
 
+# ============================== (v) Using Model M1 ============================
+## M1: Sampling with replacement. 10'000 Empirical Distribution
+fbl_m1_sim <- function(N = length(portfolioReturn$PortRet)) {
+  
+  
+  ## Empirical Distribution Simulation
+  m1_sim_port_ret <- sample(tail(portfolioReturn$PortRet, N), 10000, replace = TRUE)
+  m1_sim_PL       <- m1_sim_port_ret * W0
+  
+  
+  ## VaR with Full Valuation Method
+  m1_VaR <- quantile(-m1_sim_PL, c(0.90, 0.95, 0.99)) 
+  
+  
+  ## ES
+  m1_ES         <- -sapply(list(m1_sim_PL[m1_sim_PL <= -m1_VaR[1]], m1_sim_PL[m1_sim_PL <= -m1_VaR[2]], m1_sim_PL[m1_sim_PL <= -m1_VaR[3]]), mean)
+  names(m1_ES)  <- c("90%", "95%", "99%")
+  
+  return(list(VaR = m1_VaR, ES = m1_ES, PL = m1_sim_PL))
+  
+}
 
+
+## Get Risk Measures for M1:
+m1_risk_measures <- fbl_m1_sim()
+
+
+
+
+# ## Plot Empirical Loss
+# m1_sim_df <- data.frame(PL = m1_sim_PL / 10000)
+# ggplot(m1_sim_df) + geom_histogram(aes(x = PL), binwidth = 1) 
+# ggplot(m1_sim_df) + geom_density(aes(x = PL))
 
