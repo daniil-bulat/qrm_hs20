@@ -25,6 +25,17 @@ suppressWarnings(suppressMessages(library(stargazer)))
 suppressWarnings(suppressMessages(library(psych)))
 suppressWarnings(suppressMessages(library(gtable)))
 suppressWarnings(suppressMessages(library(gridExtra)))
+# ============================== Functions ====================================
+## MLE Estimation Function
+fbl_mle = function(ret = returns[-1]) {
+  
+  ## MLE Parameter Estimates
+  MLEparameters   = mlest(ret)
+  MLEmeanGaussian = MLEparameters$muhat
+  MLEVCVGaussian  = MLEparameters$sigmahat
+  
+  return(list(MLEmeanGaussian = MLEmeanGaussian, MLEVCVGaussian = MLEVCVGaussian))
+}
 
 # ============================== Data =========================================
 ## Working Directory Setting
@@ -40,32 +51,18 @@ prices = merge(SP500_ind, SMI_ind, by.x = 1, by.y = 1, all = T)
 prices = xts(prices[2:3], prices[[1]])
 prices = na.locf(prices)
 
-## Get Returns
-returns = na.omit(exp(diff(log(prices)))) - 1
-
+## Get Weekly Returns
+returns = na.omit(diff(log(prices)))
+returns = apply.weekly(returns, function(x) apply(x, 2, sum))
 
 ## Convert Back to Dataframe
-returns         = data.frame(index(returns), coredata(returns))
+returns  = data.frame(index(returns), coredata(returns))
 names(returns)  = c("Date", "SP_500", "SMI")
-
 
 # ============================== (iv) MLE M2, M3 ==============================
 # M2
-
-## MLE Estimation Function
-fbl_mle = function(ret = returns[-1]) {
-  
-  ## MLE Parameter Estimates
-  MLEparameters   = mlest(ret)
-  MLEmeanGaussian = MLEparameters$muhat
-  MLEVCVGaussian  = MLEparameters$sigmahat
-  
-  return(list(MLEmeanGaussian = MLEmeanGaussian, MLEVCVGaussian = MLEVCVGaussian))
-}
-
 ## MLE Parameters
 MLE = fbl_mle()
-
 
 # M3
 ## Generate the t-copula with Theta = 2 (assumed since it is often used in the book)
@@ -74,7 +71,6 @@ cop_select = BiCopSelect(pnorm(returns$SP_500, mean = MLE$MLEmeanGaussian[1], sd
                           pnorm(returns$SMI, mean = MLE$MLEmeanGaussian[2], sd = sqrt(diag(MLE$MLEVCVGaussian))[2]),
                           familyset = 2, selectioncrit = "BIC", method = "mle")
 summary(cop_select)
-str(cop_select)
 
 ## t-copula (since the Gaussian Copula doesn't add enough dependence, especially in the tails).
 tCop <- tCopula(param = 0.56, dim = 2, df = 1)
@@ -99,28 +95,46 @@ fbl_m1_sim <- function(N = length(portfolioReturn$PortRet)) {
   m1_sim_port_ret <- sample(tail(portfolioReturn$PortRet, N), 10000, replace = TRUE)
   m1_sim_PL       <- m1_sim_port_ret * W0
   
-  
-  ## VaR with Full Valuation Method
-  m1_VaR <- quantile(-m1_sim_PL, c(0.90, 0.95, 0.99)) 
-  
-  
-  ## ES
-  m1_ES         <- -sapply(list(m1_sim_PL[m1_sim_PL <= -m1_VaR[1]], m1_sim_PL[m1_sim_PL <= -m1_VaR[2]], m1_sim_PL[m1_sim_PL <= -m1_VaR[3]]), mean)
-  names(m1_ES)  <- c("90%", "95%", "99%")
-  
-  return(list(VaR = m1_VaR, ES = m1_ES, PL = m1_sim_PL))
+  return(PL = m1_sim_PL)
   
 }
-
 
 ## Get Risk Measures for M1:
 m1_risk_measures <- fbl_m1_sim()
 
+m1_sim_SP_500_ret = mean(sample(tail(returns$SP_500, length(returns[,1])), 10000, replace = TRUE))
+m1_sim_SMI_ret = mean(sample(tail(returns$SMI, length(returns[,1])), 10000, replace = TRUE))
 
+theta = c(m1_sim_SP_500_ret,m1_sim_SMI_ret)
 
+set.seed(7777)
+pure_ret_1 = as.numeric(as.character(unlist(returns[,2])))
+pure_ret_2 = as.numeric(as.character(unlist(returns[,3])))
+pure_ret = cbind(pure_ret_1,pure_ret_2)
 
-# ## Plot Empirical Loss
-# m1_sim_df <- data.frame(PL = m1_sim_PL / 10000)
-# ggplot(m1_sim_df) + geom_histogram(aes(x = PL), binwidth = 1) 
-# ggplot(m1_sim_df) + geom_density(aes(x = PL))
+a_1 = as.numeric(as.character(unlist(creditportfolio[,7])))
+a_2 = as.numeric(as.character(unlist(creditportfolio[,8])))
+a_k = cbind(a_1,a_2)
+
+lambda_k = creditportfolio$lambda_k
+e_k = rnorm(100, 0, 1)
+
+Y_k_m1 = rep(NA, 100)
+sd_Y = 1
+
+for (i in 1:100){
+  Y_k_m1[i] = sqrt(creditportfolio$lambda_k[i]) * a_k[i,] %*% theta +
+    sqrt(1-creditportfolio$lambda_k[i]) * sd_Y * e_k[i]
+}
+
+# ============================== (vi) Y_k M2, M3 ==============================
+## M2
+Y_k_m2 = rep(NA, 100)
+theta = c(MLE[[1]][1],MLE[[1]][2])
+
+for (i in 1:100){
+  Y_k_m2[i] = sqrt(creditportfolio$lambda_k[i]) * a_k[i,] %*% theta +
+    sqrt(1-creditportfolio$lambda_k[i]) * sd_Y * e_k[i]
+}
+
 
