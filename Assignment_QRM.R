@@ -125,7 +125,7 @@ a_k = cbind(a_1,a_2)
 
 m1_simulation = m_simulation(theta, a_k, lambda_k, e_k, pi_k, sd_Y)
 
-# ============================== (vi) YSimulation M2, M3 ==============================
+# ============================== (vi) Simulation M2, M3 ==============================
 ## M2 Bivariate Gaussian Simulation
 
 N = 10000
