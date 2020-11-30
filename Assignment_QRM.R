@@ -26,6 +26,7 @@ suppressWarnings(suppressMessages(library(psych)))
 suppressWarnings(suppressMessages(library(gtable)))
 suppressWarnings(suppressMessages(library(gridExtra)))
 suppressWarnings(suppressMessages(library(EnvStats)))
+suppressWarnings(suppressMessages(library (mvtnorm)))
 # ============================== Functions ====================================
 ## MLE Estimation Function
 fbl_mle = function(ret = returns[-1]) {
@@ -148,7 +149,6 @@ m2_simulation = m_simulation(bvn, a_k, lambda_k, e_k, pi_k, sd_Y)
 
 
 ## M3
-library (mvtnorm)
 gauss_dist = mvtnorm::rmvnorm(N,mu,sigma, method="svd")
 colnames(gauss_dist) = c("SP_500","SMI")
 
