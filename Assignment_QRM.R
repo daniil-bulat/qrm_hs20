@@ -38,6 +38,23 @@ fbl_mle = function(ret = returns[-1]) {
   return(list(MLEmeanGaussian = MLEmeanGaussian, MLEVCVGaussian = MLEVCVGaussian))
 }
 
+## Simulation of Empirical Distribution (10'000 Simulations) with Replacement
+m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, sd_Y){
+  Y_k = matrix(NA,10000,1)
+  Y_k_list = rep(list(Y_k),100) # List of Y_k simulations
+  d_k = matrix(NA,100,1) # vector for d_k values
+  
+  for (j in 1:100){
+    for (i in 1:10000){
+      Y_k[i] = sqrt(lambda_k[j]) * a_k[j,] %*% theta[i,] +
+        sqrt(1-lambda_k[j]) * sd_Y * e_k[j]
+    }
+    Y_k_list[[j]] = Y_k
+    d_k[j] = quantile(Y_k, pi_k[j], type=1)
+  }
+  return(list(simulation = Y_k_list, d_k = d_k))
+}
+
 # ============================== Data =========================================
 ## Working Directory Setting
 wd = dirname(rstudioapi::getSourceEditorContext()$path)
@@ -87,45 +104,53 @@ plot(returns$SP_500, returns$SMI, ylab = "SMI", xlab = "SP_500")
 points(m3_sim$SP_500, m3_sim$SMI, col = "red")
 legend('bottomright',c('Observed','Simulated'),col=c('black','red'),pch=21)
 
-# ============================== (v) Using Model M1 ============================
+# ============================== (v) Simulation M1 ============================
 ## M1: Sampling with replacement. 10'000 Empirical Distribution
+# General Variables
+lambda_k = creditportfolio$lambda_k
+e_k = rnorm(100, 0, 1)
+pi_k = creditportfolio$pi_k
+sd_Y = 1
+
+# Simulation
 set.seed(7777)
 m1_sim_SP_500_ret = sample(tail(returns$SP_500, length(returns[,1])), 10000, replace = TRUE)
 m1_sim_SMI_ret = sample(tail(returns$SMI, length(returns[,1])), 10000, replace = TRUE)
-
 theta = cbind(m1_sim_SP_500_ret,m1_sim_SMI_ret)
 
 a_1 = as.numeric(as.character(unlist(creditportfolio[,7])))
 a_2 = as.numeric(as.character(unlist(creditportfolio[,8])))
 a_k = cbind(a_1,a_2)
 
-lambda_k = creditportfolio$lambda_k
-e_k = rnorm(100, 0, 1)
-pi_k = creditportfolio$pi_k
-sd_Y = 1
+m1_simulation = m_simulation(theta, a_k, lambda_k, e_k, pi_k, sd_Y)
 
-Y_k_sim = matrix(NA,10000,1)
-Y_k_list = rep(list(Y_k_sim),100)
-d_k = matrix(NA,100,1)
+# ============================== (vi) YSimulation M2, M3 ==============================
+## M2 Bivariate Gaussian Simulation
 
-for (j in 1:100){
-  for (i in 1:10000){
-    Y_k_sim[i] = sqrt(lambda_k[j]) * a_k[j,] %*% theta[i,] +
-      sqrt(1-lambda_k[j]) * sd_Y * e_k[j]
-  }
-  Y_k_list[[j]] = Y_k_sim
-  d_k[j] = quantile(Y_k_sim, pi_k[j], type=1)
-}
+N = 10000
+# Target parameters for univariate normal distributions
+mu1 = MLE$MLEmeanGaussian[1]; s1 = sqrt(MLE$MLEVCVGaussian[1])
+mu2 = MLE$MLEmeanGaussian[2]; s2 = sqrt(MLE$MLEVCVGaussian[4])
+rho = MLE$MLEVCVGaussian[3] / (s1*s2)
+  
+# Parameters for bivariate normal distribution
+mu = c(mu1,mu2)
+sigma = matrix(c(s1^2, s1*s2*rho, s1*s2*rho, s2^2),2) # Covariance matrix
 
-# ============================== (vi) Y_k M2, M3 ==============================
-## M2
-Y_k_m2 = rep(NA, 100)
-theta = c(MLE[[1]][1],MLE[[1]][2])
+M = t(chol(sigma))
+# M %*% t(M)
+Z = matrix(rnorm(2*N),2,N) # 2 rows, N/2 columns
+bvn = t(M %*% Z) + matrix(rep(mu,N), byrow=TRUE,ncol=2)
+colnames(bvn) = c("SP_500","SMI")
 
-for (i in 1:100){
-  Y_k_m2[i] = sqrt(creditportfolio$lambda_k[i]) * a_k[i,] %*% theta +
-    sqrt(1-creditportfolio$lambda_k[i]) * sd_Y * e_k[i]
-}
+# M2 Simulation of Y_k's
+m2_simulation = m_simulation(bvn, a_k, lambda_k, e_k, pi_k, sd_Y)
+
 
 ## M3
+library (mvtnorm)
+gauss_dist = mvtnorm::rmvnorm(N,mu,sigma, method="svd")
+colnames(gauss_dist) = c("SP_500","SMI")
 
+# M3 Simulation of Y_k's
+m3_simulation = m_simulation(gauss_dist, a_k, lambda_k, e_k, pi_k, sd_Y)
