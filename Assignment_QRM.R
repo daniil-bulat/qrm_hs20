@@ -148,9 +148,11 @@ colnames(bvn) = c("SP_500","SMI")
 m2_simulation = m_simulation(bvn, a_k, lambda_k, e_k, pi_k, sd_Y)
 
 
-## M3
+## M3 Gaussian Distribution Simulation
 gauss_dist = mvtnorm::rmvnorm(N,mu,sigma, method="svd")
 colnames(gauss_dist) = c("SP_500","SMI")
 
 # M3 Simulation of Y_k's
 m3_simulation = m_simulation(gauss_dist, a_k, lambda_k, e_k, pi_k, sd_Y)
+
+
