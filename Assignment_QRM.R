@@ -106,6 +106,7 @@ sd_Y = 1
 
 Y_k_sim = matrix(NA,10000,1)
 Y_k_list = rep(list(Y_k_sim),100)
+d_k = matrix(NA,100,1)
 
 for (j in 1:100){
   for (i in 1:10000){
@@ -113,10 +114,8 @@ for (j in 1:100){
       sqrt(1-lambda_k[j]) * sd_Y * e_k[j]
   }
   Y_k_list[[j]] = Y_k_sim
+  d_k[j] = quantile(Y_k_sim, pi_k[j], type=1)
 }
-d_k = quantile(Y_1, pi_k[1], type=1)
-
-
 
 # ============================== (vi) Y_k M2, M3 ==============================
 ## M2
