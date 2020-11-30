@@ -25,6 +25,7 @@ suppressWarnings(suppressMessages(library(stargazer)))
 suppressWarnings(suppressMessages(library(psych)))
 suppressWarnings(suppressMessages(library(gtable)))
 suppressWarnings(suppressMessages(library(gridExtra)))
+suppressWarnings(suppressMessages(library(EnvStats)))
 # ============================== Functions ====================================
 ## MLE Estimation Function
 fbl_mle = function(ret = returns[-1]) {
@@ -73,13 +74,13 @@ cop_select = BiCopSelect(pnorm(returns$SP_500, mean = MLE$MLEmeanGaussian[1], sd
 summary(cop_select)
 
 ## t-copula (since the Gaussian Copula doesn't add enough dependence, especially in the tails).
-tCop <- tCopula(param = 0.56, dim = 2, df = 1)
+tCop = tCopula(param = 0.78, dim = 2)
 
 #Generate RV (number equals the number of returns for both stocks)
 RVtCopula = rCopula(2*length(returns[,2]),tCop)
 
 
-m3_sim <- data.frame(SP_500 = qnorm(RVtCopula[,1], mean = MLE$MLEmeanGaussian[1], sd = sqrt(MLE$MLEVCVGaussian[1])),
+m3_sim = data.frame(SP_500 = qnorm(RVtCopula[,1], mean = MLE$MLEmeanGaussian[1], sd = sqrt(MLE$MLEVCVGaussian[1])),
                      SMI   = qnorm(RVtCopula[,2], mean = MLE$MLEmeanGaussian[2], sd = sqrt(MLE$MLEVCVGaussian[2])))
 
 plot(returns$SP_500, returns$SMI, ylab = "SMI", xlab = "SP_500")
@@ -88,29 +89,11 @@ legend('bottomright',c('Observed','Simulated'),col=c('black','red'),pch=21)
 
 # ============================== (v) Using Model M1 ============================
 ## M1: Sampling with replacement. 10'000 Empirical Distribution
-fbl_m1_sim <- function(N = length(portfolioReturn$PortRet)) {
-  
-  
-  ## Empirical Distribution Simulation
-  m1_sim_port_ret <- sample(tail(portfolioReturn$PortRet, N), 10000, replace = TRUE)
-  m1_sim_PL       <- m1_sim_port_ret * W0
-  
-  return(PL = m1_sim_PL)
-  
-}
-
-## Get Risk Measures for M1:
-m1_risk_measures <- fbl_m1_sim()
-
-m1_sim_SP_500_ret = mean(sample(tail(returns$SP_500, length(returns[,1])), 10000, replace = TRUE))
-m1_sim_SMI_ret = mean(sample(tail(returns$SMI, length(returns[,1])), 10000, replace = TRUE))
-
-theta = c(m1_sim_SP_500_ret,m1_sim_SMI_ret)
-
 set.seed(7777)
-pure_ret_1 = as.numeric(as.character(unlist(returns[,2])))
-pure_ret_2 = as.numeric(as.character(unlist(returns[,3])))
-pure_ret = cbind(pure_ret_1,pure_ret_2)
+m1_sim_SP_500_ret = sample(tail(returns$SP_500, length(returns[,1])), 10000, replace = TRUE)
+m1_sim_SMI_ret = sample(tail(returns$SMI, length(returns[,1])), 10000, replace = TRUE)
+
+theta = cbind(m1_sim_SP_500_ret,m1_sim_SMI_ret)
 
 a_1 = as.numeric(as.character(unlist(creditportfolio[,7])))
 a_2 = as.numeric(as.character(unlist(creditportfolio[,8])))
@@ -118,14 +101,22 @@ a_k = cbind(a_1,a_2)
 
 lambda_k = creditportfolio$lambda_k
 e_k = rnorm(100, 0, 1)
-
-Y_k_m1 = rep(NA, 100)
+pi_k = creditportfolio$pi_k
 sd_Y = 1
 
-for (i in 1:100){
-  Y_k_m1[i] = sqrt(creditportfolio$lambda_k[i]) * a_k[i,] %*% theta +
-    sqrt(1-creditportfolio$lambda_k[i]) * sd_Y * e_k[i]
+Y_k_sim = matrix(NA,10000,1)
+Y_k_list = rep(list(Y_k_sim),100)
+
+for (j in 1:100){
+  for (i in 1:10000){
+    Y_k_sim[i] = sqrt(lambda_k[j]) * a_k[j,] %*% theta[i,] +
+      sqrt(1-lambda_k[j]) * sd_Y * e_k[j]
+  }
+  Y_k_list[[j]] = Y_k_sim
 }
+d_k = quantile(Y_1, pi_k[1], type=1)
+
+
 
 # ============================== (vi) Y_k M2, M3 ==============================
 ## M2
@@ -137,4 +128,5 @@ for (i in 1:100){
     sqrt(1-creditportfolio$lambda_k[i]) * sd_Y * e_k[i]
 }
 
+## M3
 
