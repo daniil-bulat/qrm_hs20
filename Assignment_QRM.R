@@ -39,9 +39,10 @@ fbl_mle = function(ret = returns[-1]) {
   return(list(MLEmeanGaussian = MLEmeanGaussian, MLEVCVGaussian = MLEVCVGaussian))
 }
 
+
 ## Simulation of Empirical Distribution (10'000 Simulations) with Replacement
-m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, sd_Y){
-  Y_k = matrix(NA,10000,1)
+m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, sd_Y,N){
+  Y_k = matrix(NA,N,1)
   Y_k_list = rep(list(Y_k),100) # List of Y_k simulations
   d_k = matrix(NA,100,1) # vector for d_k values
   
@@ -55,6 +56,35 @@ m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, sd_Y){
   }
   return(list(simulation = Y_k_list, d_k = d_k))
 }
+
+
+# ## Simulation of Empirical Distribution (10'000 Simulations) with Replacement
+# m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, sd_Y,N){
+#   cred_prot_sim = data.frame(Y_k=numeric(N),pi_k=numeric(N),lambda_k=numeric(N),
+#                              a_k1=numeric(N),a_k2=numeric(N),sd_Y=numeric(N),d_k=numeric(N))
+#   cps_list = rep(list(cred_prot_sim),100) # List of Y_k simulations
+#   #d_k = matrix(NA,100,1) # vector for d_k values
+#   
+#   for (j in 1:100){
+#     for (i in 1:N){
+#       cred_prot_sim[i,1] = sqrt(lambda_k[j]) * a_k[j,] %*% theta[i,] +
+#         sqrt(1-lambda_k[j]) * sd_Y * e_k[j]
+# 
+#     }
+#     
+#     cred_prot_sim[,2] = rep(pi_k[j],N)
+#     cred_prot_sim[,3] = rep(lambda_k[j],N)
+#     cred_prot_sim[,4] = rep(a_k[j,1],N)
+#     cred_prot_sim[,5] = rep(a_k[j,2],N)
+#     cred_prot_sim[,6] = rep(sd_Y,N)
+#     cred_prot_sim[,7] = rep(quantile(cred_prot_sim$Y_k, pi_k[j], type=1),N)
+#     cred_prot_sim[,8] = theta[,1]
+#     cred_prot_sim[,9] = theta[,2]
+#     cps_list[[j]] = cred_prot_sim
+#     #d_k[j] = quantile(cred_prot_sim$Y_k, pi_k[j], type=1)
+#   }
+#   return(list(simulation = cps_list))#, d_k = d_k))
+# }
 
 # ============================== Data =========================================
 ## Working Directory Setting
@@ -108,6 +138,7 @@ legend('bottomright',c('Observed','Simulated'),col=c('black','red'),pch=21)
 # ============================== (v) Simulation M1 ============================
 ## M1: Sampling with replacement. 10'000 Empirical Distribution
 # General Variables
+N = 10000
 lambda_k = creditportfolio$lambda_k
 e_k = rnorm(100, 0, 1)
 pi_k = creditportfolio$pi_k
@@ -115,17 +146,17 @@ sd_Y = 1
 
 # Simulation
 set.seed(7777)
-m1_sim_SP_500_ret = sample(tail(returns$SP_500, length(returns[,1])), 10000, replace = TRUE)
-m1_sim_SMI_ret = sample(tail(returns$SMI, length(returns[,1])), 10000, replace = TRUE)
+m1_sim_SP_500_ret = sample(tail(returns$SP_500, length(returns[,1])), N, replace = TRUE)
+m1_sim_SMI_ret = sample(tail(returns$SMI, length(returns[,1])), N, replace = TRUE)
 theta = cbind(m1_sim_SP_500_ret,m1_sim_SMI_ret)
 
 a_1 = as.numeric(as.character(unlist(creditportfolio[,7])))
 a_2 = as.numeric(as.character(unlist(creditportfolio[,8])))
 a_k = cbind(a_1,a_2)
 
-m1_simulation = m_simulation(theta, a_k, lambda_k, e_k, pi_k, sd_Y)
+m1_simulation = m_simulation(theta, a_k, lambda_k, e_k, pi_k, sd_Y,N)
 
-# ============================== (vi) Simulation M2, M3 ==============================
+# ============================== (vi) Simulation M2, M3 =======================
 ## M2 Bivariate Gaussian Simulation
 
 N = 10000
@@ -154,5 +185,26 @@ colnames(gauss_dist) = c("SP_500","SMI")
 
 # M3 Simulation of Y_k's
 m3_simulation = m_simulation(gauss_dist, a_k, lambda_k, e_k, pi_k, sd_Y)
+
+# ============================== Testing ======================================
+
+## Density Plot
+d = density(as.numeric(unlist(m1_simulation[[1]][1])))
+plot(d, main="Density of Y_k")
+polygon(d, col="red", border="blue")
+
+## Loss Function
+for (j in 1:100){
+  loss = data.frame(loss=numeric(N))
+  for (i in 1:N){
+    cond_prob_def = pnorm((creditportfolio$pi_k[j] - sqrt(creditportfolio$lambda_k[j]) 
+                           * a_k[j,] %*% theta[i,]) /
+                            (sqrt(1-creditportfolio$lambda_k[j]) * sd_Y))
+    loss$loss[i] = creditportfolio$`Exposure USD`[j] * (1-creditportfolio$R_k[j]) * cond_prob_def
+  }
+  creditportfolio$avrg_loss[j] = mean(loss$loss)
+}
+
+portfolio_loss = sum(creditportfolio$avrg_loss)
 
 
