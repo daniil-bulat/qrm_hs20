@@ -97,34 +97,34 @@ SP500_ind = read_excel("data/qrm20HSG_indexes.xlsx", sheet = "S&P500")
 SMI_ind = read_excel("data/qrm20HSG_indexes.xlsx", sheet = "SMI")
 
 prices = merge(SP500_ind, SMI_ind, by.x = 1, by.y = 1, all = T)
-prices = xts(prices[2:3], prices[[1]])
+prices = xts(prices[2:3], prices[[1]]) # convert to xts
 prices = na.locf(prices)
 
 ## Get Weekly Returns
 returns = na.omit(diff(log(prices)))
-returns = apply.weekly(returns, function(x) apply(x, 2, sum))
+returns = apply.weekly(returns, function(x) apply(x, 2, sum)) # weekly returns
 
 ## Convert Back to Dataframe
 returns  = data.frame(index(returns), coredata(returns))
 names(returns)  = c("Date", "SP_500", "SMI")
 
 # ============================== (iv) MLE M2, M3 ==============================
-# M2
-## MLE Parameters
+## M2
+# MLE Parameters
 MLE = fbl_mle()
 
-# M3
-## Generate the t-copula with Theta = 2 (assumed since it is often used in the book)
+## M3
+# Generate the t-copula with Theta = 2 (assumed since it is often used in the book)
 
 cop_select = BiCopSelect(pnorm(returns$SP_500, mean = MLE$MLEmeanGaussian[1], sd = sqrt(diag(MLE$MLEVCVGaussian))[1]),
                           pnorm(returns$SMI, mean = MLE$MLEmeanGaussian[2], sd = sqrt(diag(MLE$MLEVCVGaussian))[2]),
                           familyset = 2, selectioncrit = "BIC", method = "mle")
 summary(cop_select)
 
-## t-copula (since the Gaussian Copula doesn't add enough dependence, especially in the tails).
+# t-copula (since the Gaussian Copula doesn't add enough dependence, especially in the tails).
 tCop = tCopula(param = 0.78, dim = 2)
 
-#Generate RV (number equals the number of returns for both stocks)
+# Generate RV (number equals the number of returns for both stocks)
 RVtCopula = rCopula(2*length(returns[,2]),tCop)
 
 
@@ -158,7 +158,6 @@ m1_simulation = m_simulation(theta, a_k, lambda_k, e_k, pi_k, sd_Y,N)
 
 # ============================== (vi) Simulation M2, M3 =======================
 ## M2 Bivariate Gaussian Simulation
-
 N = 10000
 # Target parameters for univariate normal distributions
 mu1 = MLE$MLEmeanGaussian[1]; s1 = sqrt(MLE$MLEVCVGaussian[1])
@@ -186,25 +185,54 @@ colnames(gauss_dist) = c("SP_500","SMI")
 # M3 Simulation of Y_k's
 m3_simulation = m_simulation(gauss_dist, a_k, lambda_k, e_k, pi_k, sd_Y)
 
-# ============================== Testing ======================================
+# ===============  (vii) Loss Distributions M1, M2, M3 ========================
 
-## Density Plot
-d = density(as.numeric(unlist(m1_simulation[[1]][1])))
-plot(d, main="Density of Y_k")
-polygon(d, col="red", border="blue")
-
-## Loss Function
-for (j in 1:100){
-  loss = data.frame(loss=numeric(N))
-  for (i in 1:N){
-    cond_prob_def = pnorm((creditportfolio$pi_k[j] - sqrt(creditportfolio$lambda_k[j]) 
-                           * a_k[j,] %*% theta[i,]) /
-                            (sqrt(1-creditportfolio$lambda_k[j]) * sd_Y))
-    loss$loss[i] = creditportfolio$`Exposure USD`[j] * (1-creditportfolio$R_k[j]) * cond_prob_def
-  }
-  creditportfolio$avrg_loss[j] = mean(loss$loss)
+## Loss Function M1
+loss_m1 = matrix(NA,100,N)
+for (i in 1:N){
+  cond_prob_def = pnorm((creditportfolio$pi_k - sqrt(creditportfolio$lambda_k) *
+                              a_k %*% theta[i,]) /
+                          (sqrt(1-creditportfolio$lambda_k) * sd_Y)) # Conditional Probability of Default
+  loss_m1[,i] = creditportfolio$`Exposure USD` * (1-creditportfolio$R_k) * cond_prob_def # loss of each k given theta
 }
 
-portfolio_loss = sum(creditportfolio$avrg_loss)
+# Portfolio Loss Distribution
+d = density(colMeans(loss_m1))
+plot(d, main="Portfolio Loss Distribution")
+polygon(d, col="red", border="blue")
+
+
+
+
+## Loss Function M2
+loss_m2 = matrix(NA,100,N)
+for (i in 1:N){
+  cond_prob_def = pnorm((creditportfolio$pi_k - sqrt(creditportfolio$lambda_k) *
+                           a_k %*% bvn[i,]) /
+                          (sqrt(1-creditportfolio$lambda_k) * sd_Y)) # Conditional Probability of Default
+  loss_m2[,i] = creditportfolio$`Exposure USD` * (1-creditportfolio$R_k) * cond_prob_def # loss of each k given theta
+}
+
+# Portfolio Loss Distribution
+d = density(colMeans(loss_m2))
+plot(d, main="Portfolio Loss Distribution")
+polygon(d, col="red", border="blue")
+
+
+
+
+## Loss Function M3
+loss_m3 = matrix(NA,100,N)
+for (i in 1:N){
+  cond_prob_def = pnorm((creditportfolio$pi_k - sqrt(creditportfolio$lambda_k) *
+                           a_k %*% gauss_dist[i,]) /
+                          (sqrt(1-creditportfolio$lambda_k) * sd_Y)) # Conditional Probability of Default
+  loss_m3[,i] = creditportfolio$`Exposure USD` * (1-creditportfolio$R_k) * cond_prob_def # loss of each k given theta
+}
+
+# Portfolio Loss Distribution
+d = density(colMeans(loss_m3))
+plot(d, main="Portfolio Loss Distribution")
+polygon(d, col="red", border="blue")
 
 
