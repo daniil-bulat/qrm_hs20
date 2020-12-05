@@ -40,14 +40,15 @@ fbl_mle = function(ret = returns[-1]) {
 }
 
 
-## Simulation of Empirical Distribution (10'000 Simulations) with Replacement
-m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, sd_Y,N){
+## Simulation Function
+m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, N){
   Y_k = matrix(NA,N,1)
   Y_k_list = rep(list(Y_k),100) # List of Y_k simulations
   d_k = matrix(NA,100,1) # vector for d_k values
   
   for (j in 1:100){
     for (i in 1:10000){
+      sd_Y = sqrt(lambda_k[j] * a_k[j,] %*% cov(theta) %*% a_k[j,])
       Y_k[i] = sqrt(lambda_k[j]) * a_k[j,] %*% theta[i,] +
         sqrt(1-lambda_k[j]) * sd_Y * e_k[j]
     }
@@ -57,8 +58,16 @@ m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, sd_Y,N){
   return(list(simulation = Y_k_list, d_k = d_k))
 }
 
+# Function of Standard Deviation of Y_k
+stan_div_Y = function(sim_par){
+  sd_Y = matrix(NA,100,1)
+  for (j in 1:100){
+    sd_Y[j] = sqrt(lambda_k[j] * a_k[j,] %*% cov(sim_par) %*% a_k[j,])
+  }
+  return(sd_Y)
+}
 
-# ## Simulation of Empirical Distribution (10'000 Simulations) with Replacement
+# ## Simulation Function
 # m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, sd_Y,N){
 #   cred_prot_sim = data.frame(Y_k=numeric(N),pi_k=numeric(N),lambda_k=numeric(N),
 #                              a_k1=numeric(N),a_k2=numeric(N),sd_Y=numeric(N),d_k=numeric(N))
@@ -86,7 +95,7 @@ m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, sd_Y,N){
 #   return(list(simulation = cps_list))#, d_k = d_k))
 # }
 
-loss_function = function(sim_par){
+loss_function = function(sim_par, sd_Y){
   loss = matrix(NA,100,N)
   for (i in 1:N){
     cond_prob_def = pnorm((creditportfolio$pi_k - sqrt(creditportfolio$lambda_k) *
@@ -167,7 +176,6 @@ N = 10000
 lambda_k = creditportfolio$lambda_k
 e_k = rnorm(100, 0, 1)
 pi_k = creditportfolio$pi_k
-sd_Y = 1
 
 # Simulation
 set.seed(7777)
@@ -179,11 +187,10 @@ a_1 = as.numeric(as.character(unlist(creditportfolio[,7])))
 a_2 = as.numeric(as.character(unlist(creditportfolio[,8])))
 a_k = cbind(a_1,a_2)
 
-m1_simulation = m_simulation(theta, a_k, lambda_k, e_k, pi_k, sd_Y,N)
+m1_simulation = m_simulation(theta, a_k, lambda_k, e_k, pi_k,N)
 
 # ============================== (vi) Simulation M2, M3 =======================
 ## M2 Bivariate Gaussian Simulation
-N = 10000
 # Target parameters for univariate normal distributions
 mu1 = MLE$MLEmeanGaussian[1]; s1 = sqrt(MLE$MLEVCVGaussian[1])
 mu2 = MLE$MLEmeanGaussian[2]; s2 = sqrt(MLE$MLEVCVGaussian[4])
@@ -200,7 +207,7 @@ bvn = t(M %*% Z) + matrix(rep(mu,N), byrow=TRUE,ncol=2)
 colnames(bvn) = c("SP_500","SMI")
 
 # M2 Simulation of Y_k's
-m2_simulation = m_simulation(bvn, a_k, lambda_k, e_k, pi_k, sd_Y)
+m2_simulation = m_simulation(bvn, a_k, lambda_k, e_k, pi_k,N)
 
 
 ## M3 Gaussian Distribution Simulation
@@ -208,21 +215,23 @@ gauss_dist = mvtnorm::rmvnorm(N,mu,sigma, method="svd")
 colnames(gauss_dist) = c("SP_500","SMI")
 
 # M3 Simulation of Y_k's
-m3_simulation = m_simulation(gauss_dist, a_k, lambda_k, e_k, pi_k, sd_Y)
+m3_simulation = m_simulation(gauss_dist, a_k, lambda_k, e_k, pi_k, N)
 
 # ===============  (vii) Loss Distributions M1, M2, M3 ========================
 
 ## Loss Function M1
-
-loss_m1 = loss_function(theta)
+sd_Y_m1 = stan_div_Y(theta)
+loss_m1 = loss_function(theta,sd_Y_m1)
 density_function(loss_m1)
 
 ## Loss Function M2
-loss_m2 = loss_function(bvn)
+sd_Y_m2 = stan_div_Y(bvn)
+loss_m2 = loss_function(bvn,sd_Y_m2)
 density_function(loss_m2)
 
 ## Loss Function M3
-loss_m3 = loss_function(gauss_dist)
+sd_Y_m3 = stan_div_Y(gauss_dist)
+loss_m3 = loss_function(gauss_dist,sd_Y_m3)
 density_function(loss_m3)
 
 
