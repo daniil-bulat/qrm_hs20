@@ -86,6 +86,31 @@ m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, sd_Y,N){
 #   return(list(simulation = cps_list))#, d_k = d_k))
 # }
 
+loss_function = function(sim_par){
+  loss = matrix(NA,100,N)
+  for (i in 1:N){
+    cond_prob_def = pnorm((creditportfolio$pi_k - sqrt(creditportfolio$lambda_k) *
+                             a_k %*% sim_par[i,]) /
+                            (sqrt(1-creditportfolio$lambda_k) * sd_Y)) # Conditional Probability of Default
+    loss[,i] = creditportfolio$`Exposure USD` * (1-creditportfolio$R_k) * cond_prob_def # loss of each k given theta
+  }
+  return(loss)
+}
+
+density_function = function(loss_dist){
+  d = density(colMeans(loss_dist))
+  plot(d, main="Portfolio Loss Distribution")
+  polygon(d, col="red", border="blue")
+}
+
+ES_function = function(loss_dist, VaR){
+  ES = -sapply(list(colMeans(loss_dist)[colMeans(loss_dist) <= -VaR[1]],
+                               colMeans(loss_dist)[colMeans(loss_dist) <= -VaR[2]],
+                               colMeans(loss_dist)[colMeans(loss_dist) <= -VaR[3]]),mean)
+  names(ES)  = c("90%", "95%", "99%")
+  return(ES)
+}
+
 # ============================== Data =========================================
 ## Working Directory Setting
 wd = dirname(rstudioapi::getSourceEditorContext()$path)
@@ -188,51 +213,94 @@ m3_simulation = m_simulation(gauss_dist, a_k, lambda_k, e_k, pi_k, sd_Y)
 # ===============  (vii) Loss Distributions M1, M2, M3 ========================
 
 ## Loss Function M1
-loss_m1 = matrix(NA,100,N)
-for (i in 1:N){
-  cond_prob_def = pnorm((creditportfolio$pi_k - sqrt(creditportfolio$lambda_k) *
-                              a_k %*% theta[i,]) /
-                          (sqrt(1-creditportfolio$lambda_k) * sd_Y)) # Conditional Probability of Default
-  loss_m1[,i] = creditportfolio$`Exposure USD` * (1-creditportfolio$R_k) * cond_prob_def # loss of each k given theta
-}
 
-# Portfolio Loss Distribution
-d = density(colMeans(loss_m1))
-plot(d, main="Portfolio Loss Distribution")
-polygon(d, col="red", border="blue")
-
-
-
+loss_m1 = loss_function(theta)
+density_function(loss_m1)
 
 ## Loss Function M2
-loss_m2 = matrix(NA,100,N)
-for (i in 1:N){
-  cond_prob_def = pnorm((creditportfolio$pi_k - sqrt(creditportfolio$lambda_k) *
-                           a_k %*% bvn[i,]) /
-                          (sqrt(1-creditportfolio$lambda_k) * sd_Y)) # Conditional Probability of Default
-  loss_m2[,i] = creditportfolio$`Exposure USD` * (1-creditportfolio$R_k) * cond_prob_def # loss of each k given theta
-}
-
-# Portfolio Loss Distribution
-d = density(colMeans(loss_m2))
-plot(d, main="Portfolio Loss Distribution")
-polygon(d, col="red", border="blue")
-
-
-
+loss_m2 = loss_function(bvn)
+density_function(loss_m2)
 
 ## Loss Function M3
-loss_m3 = matrix(NA,100,N)
-for (i in 1:N){
-  cond_prob_def = pnorm((creditportfolio$pi_k - sqrt(creditportfolio$lambda_k) *
-                           a_k %*% gauss_dist[i,]) /
-                          (sqrt(1-creditportfolio$lambda_k) * sd_Y)) # Conditional Probability of Default
-  loss_m3[,i] = creditportfolio$`Exposure USD` * (1-creditportfolio$R_k) * cond_prob_def # loss of each k given theta
-}
-
-# Portfolio Loss Distribution
-d = density(colMeans(loss_m3))
-plot(d, main="Portfolio Loss Distribution")
-polygon(d, col="red", border="blue")
+loss_m3 = loss_function(gauss_dist)
+density_function(loss_m3)
 
 
+# ===============  (viii) VaR and ES for  M1, M2, M3  ==========================
+## M1
+m1_VaR = quantile(-colMeans(loss_m1), c(0.90, 0.95, 0.99)) # VaR
+m1_ES = ES_function(loss_m1, m1_VaR) #ES
+
+## M2
+m2_VaR = quantile(-colMeans(loss_m2), c(0.90, 0.95, 0.99)) #VaR
+m2_ES = ES_function(loss_m2, m2_VaR) #ES
+
+## M3
+m3_VaR = quantile(-colMeans(loss_m3), c(0.90, 0.95, 0.99)) #VaR
+m3_ES = ES_function(loss_m3, m3_VaR) #ES
+
+
+# ================================  (ix)  ======================================
+
+## Last 500 Daily Returns
+last_500_returns = na.omit(diff(log(prices)))
+last_500_returns = last_500_returns[4880:5379,]
+
+# Convert Back to Dataframe
+last_500_returns  = data.frame(index(last_500_returns), coredata(last_500_returns))
+names(last_500_returns)  = c("Date", "SP_500", "SMI")
+
+## M1: Sampling with replacement. 10'000 Empirical Distribution :: last 500
+# Simulation
+set.seed(7777)
+l_500_m1_sim_SP_500_ret = sample(tail(last_500_returns$SP_500, length(last_500_returns[,1])), N, replace = TRUE)
+l_500_m1_sim_SMI_ret = sample(tail(last_500_returns$SMI, length(last_500_returns[,1])), N, replace = TRUE)
+l_500_theta = cbind(l_500_m1_sim_SP_500_ret, l_500_m1_sim_SMI_ret)
+
+# Loss Function M1 :: last 500
+l_500_loss_m1 = loss_function(l_500_theta)
+density_function(l_500_loss_m1)
+l_500_m1_VaR = quantile(-colMeans(l_500_loss_m1), c(0.90, 0.95, 0.99)) #VaR
+l_500_m1_ES = ES_function(l_500_loss_m1, l_500_m1_VaR) #ES
+
+
+
+
+
+## M2 Bivariate Gaussian Simulation
+l_500_MLE = fbl_mle(ret = last_500_returns[-1])
+
+# Target parameters for univariate normal distributions
+mu1 = l_500_MLE$MLEmeanGaussian[1]; s1 = sqrt(l_500_MLE$MLEVCVGaussian[1])
+mu2 = l_500_MLE$MLEmeanGaussian[2]; s2 = sqrt(l_500_MLE$MLEVCVGaussian[4])
+rho = l_500_MLE$MLEVCVGaussian[3] / (s1*s2)
+
+# Parameters for bivariate normal distribution
+mu = c(mu1,mu2)
+sigma = matrix(c(s1^2, s1*s2*rho, s1*s2*rho, s2^2),2) # Covariance matrix
+
+M = t(chol(sigma))
+# M %*% t(M)
+Z = matrix(rnorm(2*N),2,N) # 2 rows, N/2 columns
+l_500_bvn = t(M %*% Z) + matrix(rep(mu,N), byrow=TRUE,ncol=2)
+colnames(l_500_bvn) = c("SP_500","SMI")
+
+# Loss Function M2 :: last 500
+l_500_loss_m2 = loss_function(l_500_bvn)
+density_function(l_500_loss_m2)
+l_500_m2_VaR = quantile(-colMeans(l_500_loss_m2), c(0.90, 0.95, 0.99)) #VaR
+l_500_m2_ES = ES_function(l_500_loss_m2, l_500_m2_VaR) #ES
+
+
+
+
+
+## M3 Gaussian Distribution Simulation
+l_500_gauss_dist = mvtnorm::rmvnorm(N,mu,sigma, method="svd")
+colnames(l_500_gauss_dist) = c("SP_500","SMI")
+
+# Loss Function M3 :: last 500
+l_500_loss_m3 = loss_function(l_500_gauss_dist)
+density_function(l_500_loss_m3)
+l_500_m3_VaR = quantile(-colMeans(l_500_loss_m3), c(0.90, 0.95, 0.99)) #VaR
+l_500_m3_ES = ES_function(l_500_loss_m3, l_500_m3_VaR) #ES
