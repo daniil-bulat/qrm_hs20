@@ -6,6 +6,7 @@
 
 # ============================== Library Calls  ==============================
 suppressWarnings(suppressMessages(library(data.table)))
+suppressWarnings(suppressMessages(library(ggpubr)))
 suppressWarnings(suppressMessages(library(lubridate)))
 suppressWarnings(suppressMessages(library(zoo)))
 suppressWarnings(suppressMessages(library(xts)))
@@ -58,7 +59,10 @@ m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, N){
   return(list(simulation = Y_k_list, d_k = d_k))
 }
 
-# Function of Standard Deviation of Y_k
+
+
+
+## Function of Standard Deviation of Y_k
 stan_div_Y = function(sim_par){
   sd_Y = matrix(NA,100,1)
   for (j in 1:100){
@@ -67,34 +71,8 @@ stan_div_Y = function(sim_par){
   return(sd_Y)
 }
 
-# ## Simulation Function
-# m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, sd_Y,N){
-#   cred_prot_sim = data.frame(Y_k=numeric(N),pi_k=numeric(N),lambda_k=numeric(N),
-#                              a_k1=numeric(N),a_k2=numeric(N),sd_Y=numeric(N),d_k=numeric(N))
-#   cps_list = rep(list(cred_prot_sim),100) # List of Y_k simulations
-#   #d_k = matrix(NA,100,1) # vector for d_k values
-#   
-#   for (j in 1:100){
-#     for (i in 1:N){
-#       cred_prot_sim[i,1] = sqrt(lambda_k[j]) * a_k[j,] %*% theta[i,] +
-#         sqrt(1-lambda_k[j]) * sd_Y * e_k[j]
-# 
-#     }
-#     
-#     cred_prot_sim[,2] = rep(pi_k[j],N)
-#     cred_prot_sim[,3] = rep(lambda_k[j],N)
-#     cred_prot_sim[,4] = rep(a_k[j,1],N)
-#     cred_prot_sim[,5] = rep(a_k[j,2],N)
-#     cred_prot_sim[,6] = rep(sd_Y,N)
-#     cred_prot_sim[,7] = rep(quantile(cred_prot_sim$Y_k, pi_k[j], type=1),N)
-#     cred_prot_sim[,8] = theta[,1]
-#     cred_prot_sim[,9] = theta[,2]
-#     cps_list[[j]] = cred_prot_sim
-#     #d_k[j] = quantile(cred_prot_sim$Y_k, pi_k[j], type=1)
-#   }
-#   return(list(simulation = cps_list))#, d_k = d_k))
-# }
 
+## Portfolio Loss Function
 loss_function = function(sim_par, sd_Y){
   loss = matrix(NA,100,N)
   for (i in 1:N){
@@ -106,12 +84,18 @@ loss_function = function(sim_par, sd_Y){
   return(loss)
 }
 
+
+
+## Density Function of Loss
 density_function = function(loss_dist){
   d = density(colMeans(loss_dist))
   plot(d, main="Portfolio Loss Distribution")
   polygon(d, col="red", border="blue")
 }
 
+
+
+## Expected Shortfall
 ES_function = function(loss_dist, VaR){
   ES = -sapply(list(colMeans(loss_dist)[colMeans(loss_dist) <= -VaR[1]],
                                colMeans(loss_dist)[colMeans(loss_dist) <= -VaR[2]],
@@ -119,6 +103,36 @@ ES_function = function(loss_dist, VaR){
   names(ES)  = c("90%", "95%", "99%")
   return(ES)
 }
+
+
+## Plot Functions
+# Density Plot of Y_k Means
+combined_plot = function(name,sim_data, color1, color2){
+  mean_k = data.frame(mean_Y_k = numeric(N))
+  for (i in 1:100){
+    mean_k$mean_Y_k[i] = mean(unlist(sim_data[[1]][i]))
+  }
+  
+  dist_mean_Y_k = ggplot(mean_k) + geom_histogram(aes(x = mean_Y_k), binwidth = 1)+
+    geom_density(aes(x = mean_Y_k),color=color1, fill=color2)+
+    labs(title=name,x="Mean Y_k", y = "Density")+
+    theme(plot.title = element_text(face = "bold", hjust = 0.5)) +
+    xlim(-0.01, 0.01) + ylim(0, 7000)
+  
+  # d_k for each k
+  d_k = data.frame(d_k = unlist(sim_data[[2]]))
+  dist_dk = ggplot(d_k) + geom_line(aes(x=1:100, y=d_k), color=color1)+
+    geom_point(aes(x=1:100, y=d_k, group=1))+
+    labs(title="d_k for each k",x="d_k", y = "Density")+
+    theme(plot.title = element_text(face = "bold", hjust = 0.5))
+  
+  
+  # Combined Plot
+  ggarrange(dist_mean_Y_k, dist_dk + rremove("x.text"),
+            ncol = 1, nrow = 2)
+}
+
+
 
 # ============================== Data =========================================
 ## Working Directory Setting
@@ -189,6 +203,24 @@ a_k = cbind(a_1,a_2)
 
 m1_simulation = m_simulation(theta, a_k, lambda_k, e_k, pi_k,N)
 
+## Plots
+# plot for Y_1
+m1_sim_df = data.frame(Y_k = unlist(m1_simulation[[1]][1]))
+ggplot(m1_sim_df) + geom_histogram(aes(x = Y_k), binwidth = 1)+
+  geom_density(aes(x = Y_k),color="darkblue", fill="lightblue")+
+  labs(title="Density Y_k=1",x="Y_k=1", y = "Density")+
+  theme(plot.title = element_text(face = "bold", hjust = 0.5))
+
+# Density Plot of Y_k Means / d_k of all k
+combined_plot("M1: Distribution of Y_k Means",m1_simulation,"darkblue","lightblue")
+
+# # d_k Density Plot
+# d_k = data.frame(d_k = unlist(m1_simulation[[2]]))
+# dens_dk = ggplot(d_k) + geom_density(aes(x = d_k),color="darkblue")+
+#   labs(title="d_k",x="d_k", y = "Density")+
+#   theme(plot.title = element_text(face = "bold", hjust = 0.5))
+
+
 # ============================== (vi) Simulation M2, M3 =======================
 ## M2 Bivariate Gaussian Simulation
 # Target parameters for univariate normal distributions
@@ -209,6 +241,8 @@ colnames(bvn) = c("SP_500","SMI")
 # M2 Simulation of Y_k's
 m2_simulation = m_simulation(bvn, a_k, lambda_k, e_k, pi_k,N)
 
+# Density Plot of Y_k Means / d_k of all k
+combined_plot("M2: Distribution of Y_k Means",m2_simulation,"indianred4","indianred1")
 
 ## M3 Gaussian Distribution Simulation
 gauss_dist = mvtnorm::rmvnorm(N,mu,sigma, method="svd")
@@ -216,6 +250,10 @@ colnames(gauss_dist) = c("SP_500","SMI")
 
 # M3 Simulation of Y_k's
 m3_simulation = m_simulation(gauss_dist, a_k, lambda_k, e_k, pi_k, N)
+
+# Density Plot of Y_k Means / d_k of all k
+combined_plot("M3: Distribution of Y_k Means",m3_simulation,"mediumslateblue","mediumpurple1")
+
 
 # ===============  (vii) Loss Distributions M1, M2, M3 ========================
 
