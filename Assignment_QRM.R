@@ -28,6 +28,8 @@ suppressWarnings(suppressMessages(library(gtable)))
 suppressWarnings(suppressMessages(library(gridExtra)))
 suppressWarnings(suppressMessages(library(EnvStats)))
 suppressWarnings(suppressMessages(library (mvtnorm)))
+
+
 # ============================== Functions ====================================
 ## MLE Estimation Function
 fbl_mle = function(ret) {
@@ -49,9 +51,9 @@ m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, N){
   
   for (j in 1:100){
     for (i in 1:10000){
-      sd_Y = sqrt(lambda_k[j] * a_k[j,] %*% cov(theta) %*% a_k[j,])
+      sd_k = sqrt(lambda_k[j] * a_k[j,] %*% cov(theta) %*% a_k[j,])
       Y_k[i] = sqrt(lambda_k[j]) * a_k[j,] %*% theta[i,] +
-        sqrt(1-lambda_k[j]) * sd_Y * e_k[j]
+        sqrt(1-lambda_k[j]) * sd_k * e_k[j]
     }
     Y_k_list[[j]] = Y_k
     d_k[j] = quantile(Y_k, pi_k[j], type=1)
@@ -60,11 +62,9 @@ m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, N){
 }
 
 
-
-
 ## Function of Standard Deviation of Y_k
 stan_div_Y = function(sim_par){
-  sd_Y = matrix(NA,100,1)
+  sd_k = matrix(NA,100,1)
   for (j in 1:100){
     sd_Y[j] = sqrt(a_k[j,] %*% cov(sim_par) %*% a_k[j,])
   }
@@ -77,13 +77,12 @@ loss_function = function(sim_par, sd_Y){
   loss = matrix(NA,100,N)
   for (i in 1:N){
     cond_prob_def = pnorm((creditportfolio$pi_k - sqrt(creditportfolio$lambda_k) *
-                             a_k %*% theta[i,]) /
+                             a_k %*% sim_par[i,]) /
                             (sqrt(1-creditportfolio$lambda_k) * sd_Y)) # Conditional Probability of Default
     loss[,i] = creditportfolio$`Exposure USD` * (1-creditportfolio$R_k) * cond_prob_def # loss of each k given theta
   }
   return(loss)
 }
-
 
 
 ## Density Function of Loss
@@ -94,7 +93,6 @@ density_function = function(loss_dist, name, color1, color2){
     labs(title=name,x="Loss in USD", y = "Density")+
     theme(plot.title = element_text(face = "bold", hjust = 0.5))
 }
-
 
 
 ## Expected Shortfall
@@ -134,14 +132,12 @@ combined_plot = function(name,sim_data, color1, color2){
             ncol = 1, nrow = 2)
 }
 
-
-
 # ============================== Data =========================================
 ## Working Directory Setting
 wd = dirname(rstudioapi::getSourceEditorContext()$path)
 setwd(wd)
 
-# Load Data
+## Load Data
 creditportfolio = read_excel("data/qrm20HSG_creditportfolio.xls")
 SP500_ind = read_excel("data/qrm20HSG_indexes.xlsx", sheet = "S&P500")
 SMI_ind = read_excel("data/qrm20HSG_indexes.xlsx", sheet = "SMI")
@@ -157,6 +153,8 @@ returns = apply.weekly(returns, function(x) apply(x, 2, sum)) # weekly returns
 ## Convert Back to Dataframe
 returns  = data.frame(index(returns), coredata(returns))
 names(returns)  = c("Date", "SP_500", "SMI")
+
+
 
 # ============================== (iv) MLE M2, M3 ==============================
 ## M2
