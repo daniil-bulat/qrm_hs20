@@ -363,8 +363,6 @@ m1_ES = ES_function(loss_m1, m1_VaR) #ES
 data.frame(VaR=m1_VaR, ES=m1_ES)
 
 
-mean(colSums(loss_m3))
-
 ## M2
 m2_VaR = quantile(colSums(loss_m2), c(0.90, 0.95, 0.99)) #VaR
 m2_ES = ES_function(loss_m2, m2_VaR) #ES
