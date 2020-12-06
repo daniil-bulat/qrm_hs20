@@ -66,7 +66,7 @@ m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, N){
 stan_div_Y = function(sim_par){
   sd_Y = matrix(NA,100,1)
   for (j in 1:100){
-    sd_Y[j] = sqrt(lambda_k[j] * a_k[j,] %*% cov(sim_par) %*% a_k[j,])
+    sd_Y[j] = sqrt(a_k[j,] %*% cov(sim_par) %*% a_k[j,])
   }
   return(sd_Y)
 }
@@ -77,7 +77,7 @@ loss_function = function(sim_par, sd_Y){
   loss = matrix(NA,100,N)
   for (i in 1:N){
     cond_prob_def = pnorm((creditportfolio$pi_k - sqrt(creditportfolio$lambda_k) *
-                             a_k %*% sim_par[i,]) /
+                             a_k %*% theta[i,]) /
                             (sqrt(1-creditportfolio$lambda_k) * sd_Y)) # Conditional Probability of Default
     loss[,i] = creditportfolio$`Exposure USD` * (1-creditportfolio$R_k) * cond_prob_def # loss of each k given theta
   }
@@ -87,10 +87,12 @@ loss_function = function(sim_par, sd_Y){
 
 
 ## Density Function of Loss
-density_function = function(loss_dist){
-  d = density(colMeans(loss_dist))
-  plot(d, main="Portfolio Loss Distribution")
-  polygon(d, col="red", border="blue")
+density_function = function(loss_dist, name, color1, color2){
+  l = data.frame(s = colSums(loss_dist))
+  ggplot(l) + #geom_histogram(aes(x = s))+
+    geom_density(aes(x = s),color=color1, fill=color2)+
+    labs(title=name,x="Loss in USD", y = "Density")+
+    theme(plot.title = element_text(face = "bold", hjust = 0.5))
 }
 
 
@@ -261,17 +263,18 @@ combined_plot("M3: Distribution of Y_k Means",m3_simulation,"mediumslateblue","m
 ## Loss Function M1
 sd_Y_m1 = stan_div_Y(theta)
 loss_m1 = loss_function(theta,sd_Y_m1)
-density_function(loss_m1)
+density_function(loss_m1, "M1: Portfolio Loss Distribution", "darkblue","lightblue")
+
 
 ## Loss Function M2
 sd_Y_m2 = stan_div_Y(bvn)
 loss_m2 = loss_function(bvn,sd_Y_m2)
-density_function(loss_m2)
+density_function(loss_m2, "M2: Portfolio Loss Distribution", "indianred4","indianred1")
 
 ## Loss Function M3
 sd_Y_m3 = stan_div_Y(gauss_dist)
 loss_m3 = loss_function(gauss_dist,sd_Y_m3)
-density_function(loss_m3)
+density_function(loss_m3, "M3: Portfolio Loss Distribution", "mediumslateblue","mediumpurple1")
 
 
 # ===============  (viii) VaR and ES for  M1, M2, M3  ==========================
