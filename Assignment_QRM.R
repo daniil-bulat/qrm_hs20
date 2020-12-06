@@ -330,27 +330,70 @@ names(roll_var_m1) = "M1"
 fbl_m2_sim = function(MLE) {
   
   ## Read in MLEs for mu and sigma
-  MLEmeanGaussian <- MLE$MLEmeanGaussian
-  MLEVCVGaussian  <- MLE$MLEVCVGaussian
+  MLEmeanGaussian = MLE$MLEmeanGaussian
+  MLEVCVGaussian  = MLE$MLEVCVGaussian
   
   ## Simualte bivariate normal
-  m2_sim     <- mvrnorm(10000, MLEmeanGaussian, MLEVCVGaussian)
-  m2_sim_PL  <- fbl_port_PL(Ret_1 = m2_sim[,1], Ret_2 = m2_sim[,2])
+  m2_sim     = mvrnorm(10000, MLEmeanGaussian, MLEVCVGaussian)
+  #m2_sim_PL  <- fbl_port_PL(Ret_1 = m2_sim[,1], Ret_2 = m2_sim[,2])
+  
+  sd_Y_m2 = stan_div_Y(m2_sim)
+  loss_m2 = colSums(loss_function(m2_sim,sd_Y_m2))
   
   
   ## VaR with Full Valuation Method
-  m2_VaR <- quantile(-m2_sim_PL, c(0.90, 0.95, 0.99)) 
+  m2_VaR <- quantile(-loss_m2, c(0.90, 0.95, 0.99)) 
   
   
   ## ES
-  m2_ES         <- -sapply(list(m2_sim_PL[m2_sim_PL <= -m2_VaR[1]], m2_sim_PL[m2_sim_PL <= -m2_VaR[2]], m2_sim_PL[m2_sim_PL <= -m2_VaR[3]]), mean)
+  m2_ES         <- -sapply(list(loss_m2[loss_m2 <= -m2_VaR[1]], loss_m2[loss_m2 <= -m2_VaR[2]], loss_m2[loss_m2 <= -m2_VaR[3]]), mean)
   names(m2_ES)  <- c("90%", "95%", "99%")
   
-  return(list(VaR = m2_VaR, ES = m2_ES, PL = m2_sim_PL, Sim = m2_sim))
+  return(list(VaR = m2_VaR, ES = m2_ES, PL = loss_m2, Sim = m2_sim))
+}
+fbl_m3_sim = function(MLE, N) {
+  
+  
+  MLEmeanGaussian = MLE$MLEmeanGaussian
+  MLEVCVGaussian  = MLE$MLEVCVGaussian
+  
+  
+  ## Cholesky Decomposition of Correlation Matrix MLE
+  cholesky  = chol(cov2cor(MLEVCVGaussian))
+  
+  ## Use the Resulting Triangular Matrix to produce Multivariate Normal Pseudo Random Numbers
+  ## With desired dependence structure (i.e. Gaussian Copula with MLE Correlation)
+  m3_sim    = matrix(rnorm(20000), 10000, 2) %*% (cholesky)
+  sd_Y_m3 = stan_div_Y(m3_sim)
+  loss_m3 = colSums(loss_function(m3_sim, sd_Y_m3))
+  
+  ## Apply Gaussian Distribution function to Extract (~ Uniform [0,1]) Quantiles
+  m3_sim_uniform = apply(m3_sim, 2, pnorm)
+  
+  
+  ## Apply Quintile Function (Univariate t) to recover Simulated Residuals
+  m3_sim_epsilons = apply(m3_sim_uniform, 2, qt, df = (N-1))
+  
+  
+  ## Plug In Definition to Recover Simulated Returns
+  m3_sim_returns = MLEmeanGaussian + m3_sim_epsilons * sqrt(diag(MLEVCVGaussian))
+
+  
+  ## VaR with Full Valuation Method
+  m3_VaR = quantile(-loss_m3, c(0.90, 0.95, 0.99)) 
+  
+  ## ES
+  m3_ES         = -sapply(list(loss_m2[loss_m2 <= -m2_VaR[1]], loss_m2[loss_m2 <= -m2_VaR[2]], loss_m2[loss_m2 <= -m2_VaR[3]]), mean)
+  names(m2_ES)  = c("90%", "95%", "99%")
+  
+  return(list(VaR = m3_VaR, ES = m3_ES, PL = loss_m3, Sim = m3_sim))
+  
+  
 }
 
+
 ## Backtesting using rolling window
-mle_of_sample <- function(x) {
+mle_of_sample = function(x) {
   # This function calculates the MLE of mu and sigma for a given sample x. In case of an error, it returns NULL 
   
   ## MLE Parameter Estimates for mu and sigma on whole sample
@@ -366,11 +409,11 @@ mle_of_sample <- function(x) {
   
 }
 
-rolling_VaR_simple <- function(x){
+rolling_VaR_simple = function(x){
   # This function calculates the VaR on the 95% confidence level from M2 and M4 for a given sample x. Fallback is NA
   
   ## Series to get MLE and calculate VaR from
-  sample_series <- na.remove(x)
+  sample_series = na.remove(x)
   
   ## Calculate MLE for mu and sigma of series:
   MLE_roll = mle_of_sample(as.data.frame(sample_series))
@@ -378,22 +421,23 @@ rolling_VaR_simple <- function(x){
   
   ## Simulate and extract VaRs for sample:
   m2_var = fbl_m2_sim(MLE_roll)
-  m3_var = fbl_m4_sim(MLE_roll, N = nrow(x)) #####!!!!!
+  m3_var = fbl_m3_sim(MLE_roll, N = nrow(x)) #####!!!!!
   
   ## Collect and return outputs in list
   return(cbind(VaR_m2 = m2_var$VaR[2], VaR_m3 = m3_var$VaR[2]))
 }
 
-## Roll over the whole sample using a window of 200 observations, returning time series object of VaR of both models for each day
+## Roll over the whole sample using a window of 500 observations, returning time series object of VaR of both models
 roll_var_simple = rollapply(returns_xts,500,rolling_VaR_simple, by.column = F)
 names(roll_var_simple) = c("M2","M3")
 
 roll_var_m1$M2 = roll_var_simple$M2
 roll_var_m1$M3 = roll_var_simple$M3
+
 ## Since the VaRs are valid for the next day, we have to lag the VaR series for one period to sync up VaRs
 roll_var_lagged = lag.xts(roll_var_m1,-1)
 
-## Create time series object holding Loss values and sync up the VaR and Loss series
+## Create time series object holding Loss values and sync up the VaR
 VaR_compare = roll_var_lagged
 colnames(VaR_compare) = c("VaR_M1","VaR_M2","VaR_M3")
 
