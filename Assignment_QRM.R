@@ -30,10 +30,10 @@ suppressWarnings(suppressMessages(library(EnvStats)))
 suppressWarnings(suppressMessages(library (mvtnorm)))
 # ============================== Functions ====================================
 ## MLE Estimation Function
-fbl_mle = function(ret = returns[-1]) {
+fbl_mle = function(ret) {
   
   ## MLE Parameter Estimates
-  MLEparameters   = mlest(ret)
+  MLEparameters   = mlest(ret[-1])
   MLEmeanGaussian = MLEparameters$muhat
   MLEVCVGaussian  = MLEparameters$sigmahat
   
@@ -161,7 +161,7 @@ names(returns)  = c("Date", "SP_500", "SMI")
 # ============================== (iv) MLE M2, M3 ==============================
 ## M2
 # MLE Parameters
-MLE = fbl_mle()
+MLE = fbl_mle(returns)
 
 ## M3
 # Generate the t-copula with Theta = 2 (assumed since it is often used in the book)
@@ -294,66 +294,179 @@ m3_ES = ES_function(loss_m3, m3_VaR) #ES
 data.frame(VaR=m3_VaR,ES=m3_ES)
 
 # ================================  (ix)  ======================================
-
-## Last 500 Daily Returns
-last_500_returns = na.omit(diff(log(prices)))
-last_500_returns = last_500_returns[4880:5379,]
-
-# Convert Back to Dataframe
-last_500_returns  = data.frame(index(last_500_returns), coredata(last_500_returns))
-names(last_500_returns)  = c("Date", "SP_500", "SMI")
-
-## M1: Sampling with replacement. 10'000 Empirical Distribution :: last 500
-# Simulation
-set.seed(7777)
-l_500_m1_sim_SP_500_ret = sample(tail(last_500_returns$SP_500, length(last_500_returns[,1])), N, replace = TRUE)
-l_500_m1_sim_SMI_ret = sample(tail(last_500_returns$SMI, length(last_500_returns[,1])), N, replace = TRUE)
-l_500_theta = cbind(l_500_m1_sim_SP_500_ret, l_500_m1_sim_SMI_ret)
-
-# Loss Function M1 :: last 500
-l_500_loss_m1 = loss_function(l_500_theta)
-density_function(l_500_loss_m1)
-l_500_m1_VaR = quantile(-colMeans(l_500_loss_m1), c(0.90, 0.95, 0.99)) #VaR
-l_500_m1_ES = ES_function(l_500_loss_m1, l_500_m1_VaR) #ES
+## M1
+loss_of_sample = function(x){
+  SP_500_sim = sample(tail(x[,1], length(x[,1])), N, replace = TRUE)
+  SMI_sim = sample(tail(x[,2], length(x[,2])), N, replace = TRUE)
+  theta = cbind(SP_500_sim,SMI_sim)
+  
+  sd_Y_m1 = stan_div_Y(theta)
+  loss_m1 = loss_function(theta,sd_Y_m1)
+  return(colSums(loss_m1))
+  
+  m2_VaR = quantile(-colMeans(loss_m2), c(0.90, 0.95, 0.99)) #VaR
+  
+}
 
 
+rolling_VaR_m1 = function(x){
+  # This function calculates the VaR on the 95% confidence level from M2 and M4 for a given sample x. Fallback is NA
+  
+  ## Series to get MLE and calculate VaR from
+  sample_series = na.remove(x)
+  
+  ## Calculate loss of series:
+  loss_roll = loss_of_sample(as.data.frame(sample_series))
+  if(is.null(loss_roll)) return(NA)
+  
+  ## Simulate and extract VaRs for sample:
+  m1_var = quantile(-loss_roll, 0.95)
+  
+  ## Collect and return outputs in list
+  return(VaR_m1 = m1_var)
+}
 
-
-
-## M2 Bivariate Gaussian Simulation
-l_500_MLE = fbl_mle(ret = last_500_returns[-1])
-
-# Target parameters for univariate normal distributions
-mu1 = l_500_MLE$MLEmeanGaussian[1]; s1 = sqrt(l_500_MLE$MLEVCVGaussian[1])
-mu2 = l_500_MLE$MLEmeanGaussian[2]; s2 = sqrt(l_500_MLE$MLEVCVGaussian[4])
-rho = l_500_MLE$MLEVCVGaussian[3] / (s1*s2)
-
-# Parameters for bivariate normal distribution
-mu = c(mu1,mu2)
-sigma = matrix(c(s1^2, s1*s2*rho, s1*s2*rho, s2^2),2) # Covariance matrix
-
-M = t(chol(sigma))
-# M %*% t(M)
-Z = matrix(rnorm(2*N),2,N) # 2 rows, N/2 columns
-l_500_bvn = t(M %*% Z) + matrix(rep(mu,N), byrow=TRUE,ncol=2)
-colnames(l_500_bvn) = c("SP_500","SMI")
-
-# Loss Function M2 :: last 500
-l_500_loss_m2 = loss_function(l_500_bvn)
-density_function(l_500_loss_m2)
-l_500_m2_VaR = quantile(-colMeans(l_500_loss_m2), c(0.90, 0.95, 0.99)) #VaR
-l_500_m2_ES = ES_function(l_500_loss_m2, l_500_m2_VaR) #ES
+## Roll over the whole sample using a window of 200 observations, returning time series object of VaR of both models for each day
+roll_var_m1 = rollapply(returns_xts,500,rolling_VaR_m1, by.column = F)
 
 
 
+## M2: Simulate Bivariate Normal distribution based on MLE
+returns_xts = na.omit(diff(log(prices)))
+fbl_m2_sim = function(MLE) {
+  
+  ## Read in MLEs for mu and sigma
+  MLEmeanGaussian <- MLE$MLEmeanGaussian
+  MLEVCVGaussian  <- MLE$MLEVCVGaussian
+  
+  ## Simualte bivariate normal
+  m2_sim     <- mvrnorm(10000, MLEmeanGaussian, MLEVCVGaussian)
+  m2_sim_PL  <- fbl_port_PL(Ret_1 = m2_sim[,1], Ret_2 = m2_sim[,2])
+  
+  
+  ## VaR with Full Valuation Method
+  m2_VaR <- quantile(-m2_sim_PL, c(0.90, 0.95, 0.99)) 
+  
+  
+  ## ES
+  m2_ES         <- -sapply(list(m2_sim_PL[m2_sim_PL <= -m2_VaR[1]], m2_sim_PL[m2_sim_PL <= -m2_VaR[2]], m2_sim_PL[m2_sim_PL <= -m2_VaR[3]]), mean)
+  names(m2_ES)  <- c("90%", "95%", "99%")
+  
+  return(list(VaR = m2_VaR, ES = m2_ES, PL = m2_sim_PL, Sim = m2_sim))
+}
+
+## Backtesting using rolling window
+mle_of_sample <- function(x) {
+  # This function calculates the MLE of mu and sigma for a given sample x. In case of an error, it returns NULL 
+  
+  ## MLE Parameter Estimates for mu and sigma on whole sample
+  MLEparameters   <- try(mlest(x))
+  
+  ## Fallback in case of failure when estimating parameters
+  if(class(MLEparameters) == "try-error") return(NULL)
+  
+  MLEmeanGaussian <- MLEparameters$muhat
+  MLEVCVGaussian  <- MLEparameters$sigmahat
+  
+  return(list(MLEmeanGaussian = MLEmeanGaussian, MLEVCVGaussian = MLEVCVGaussian))
+  
+}
+
+rolling_VaR_simple <- function(x){
+  # This function calculates the VaR on the 95% confidence level from M2 and M4 for a given sample x. Fallback is NA
+  
+  ## Series to get MLE and calculate VaR from
+  sample_series <- na.remove(x)
+  
+  ## Calculate MLE for mu and sigma of series:
+  MLE_roll <- mle_of_sample(as.data.frame(sample_series))
+  if(is.null(MLE_roll)) return(NA)
+  
+  ## Simulate and extract VaRs for sample:
+  m2_var <- fbl_m2_sim(MLE_roll)
+  m4_var <- fbl_m4_sim(MLE_roll, N = nrow(x))
+  
+  ## Collect and return outputs in list
+  return(cbind(VaR_m2 = m2_var$VaR[2], VaR_m4 = m4_var$VaR[2]))
+}
+
+## Roll over the whole sample using a window of 200 observations, returning time series object of VaR of both models for each day
+roll_var_simple = rollapply(returns_xts,500,rolling_VaR_simple, by.column = F)
+
+## Since the VaRs are valid for the next day, we have to lag the VaR series for one period to sync up VaRs
+roll_var_simple_lagged = lag.xts(roll_var_simple,-1)
+
+## Create time series object holding Loss values and sync up the VaR and Loss series
+VaR_compare <- roll_var_simple_lagged
+colnames(VaR_compare) <- c("VaR_M1")
+
+## Plot
+autoplot(VaR_compare)
+################################################################################
+################################################################################
+################################################################################
+################################################################################
 
 
-## M3 Gaussian Distribution Simulation
-l_500_gauss_dist = mvtnorm::rmvnorm(N,mu,sigma, method="svd")
-colnames(l_500_gauss_dist) = c("SP_500","SMI")
 
-# Loss Function M3 :: last 500
-l_500_loss_m3 = loss_function(l_500_gauss_dist)
-density_function(l_500_loss_m3)
-l_500_m3_VaR = quantile(-colMeans(l_500_loss_m3), c(0.90, 0.95, 0.99)) #VaR
-l_500_m3_ES = ES_function(l_500_loss_m3, l_500_m3_VaR) #ES
+## Backtesting using rolling window
+mle_of_sample = function(x) {
+  # This function calculates the MLE of mu and sigma for a given sample x. In case of an error, it returns NULL 
+  
+  ## MLE Parameter Estimates for mu and sigma on whole sample
+  MLEparameters   <- try(mlest(x))
+  
+  ## Fallback in case of failure when estimating parameters
+  if(class(MLEparameters) == "try-error") return(NULL)
+  
+  MLEmeanGaussian <- MLEparameters$muhat
+  MLEVCVGaussian  <- MLEparameters$sigmahat
+  
+  return(list(MLEmeanGaussian = MLEmeanGaussian, MLEVCVGaussian = MLEVCVGaussian))
+  
+}
+
+rolling_VaR_simple = function(x){
+  # This function calculates the VaR on the 95% confidence level from M2 and M4 for a given sample x. Fallback is NA
+  
+  ## Series to get MLE and calculate VaR from
+  sample_series = na.remove(x)
+  
+  ## Calculate MLE for mu and sigma of series:
+  MLE_roll = mle_of_sample(as.data.frame(sample_series))
+  if(is.null(MLE_roll)) return(NA)
+  
+  ## Simulate and extract VaRs for sample:
+  m2_var = m1_sim_VaR(MLE_roll)
+  m4_var = fbl_m4_sim(MLE_roll, N = nrow(x))
+  
+  ## Collect and return outputs in list
+  return(cbind(VaR_m2 = m2_var$VaR[2], VaR_m4 = m4_var$VaR[2]))
+}
+
+## Roll over the whole sample using a window of 200 observations, returning time series object of VaR of both models for each day
+roll_var_simple <- rollapply(returns_ts,200,rolling_VaR_simple, by.column = F)
+
+## Since the VaRs are valid for the next day, we have to lag the VaR series for one period to sync up VaRs and P&L
+roll_var_simple_lagged <- lag.xts(roll_var_simple,-1)
+
+## Create time series object holding Loss values and sync up the VaR and Loss series
+PL_ts <- xts(portfolioPL$PL, order.by = portfolioPL$Dates)
+VaR_compare <- cbind(roll_var_simple_lagged, -PL_ts)
+colnames(VaR_compare) <- c("VaR_M2", "VaR_M4", "PL")
+
+## Detect M2 violations
+VaR_compare$M2_violation <- 0
+VaR_compare$M2_violation[which(VaR_compare$PL>VaR_compare$VaR_M2)] <- 1
+
+## Detect M4 violations
+VaR_compare$M4_violation <- 0
+VaR_compare$M4_violation[which(VaR_compare$PL>VaR_compare$VaR_M4)] <- 1
+
+autoplot(VaR_compare)
+
+
+
+
+
+
