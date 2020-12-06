@@ -358,9 +358,12 @@ density_function(loss_m3, "M3: Portfolio Loss Distribution", "mediumslateblue","
 
 # ===============  (viii) VaR and ES for  M1, M2, M3  ==========================
 ## M1
-m1_VaR = quantile(colSums(loss_m1), c(0.90, 0.95, 0.99999)) # VaR
+m1_VaR = quantile(as.numeric(colSums(loss_m1)), c(0.90, 0.95, 0.99)) # VaR
 m1_ES = ES_function(loss_m1, m1_VaR) #ES
 data.frame(VaR=m1_VaR, ES=m1_ES)
+
+
+mean(colSums(loss_m3))
 
 ## M2
 m2_VaR = quantile(colSums(loss_m2), c(0.90, 0.95, 0.99)) #VaR
