@@ -101,8 +101,8 @@ fbl_m3_sim = function(x,MLE, N) {
   # t-copula (since the Gaussian Copula doesn't add enough dependence, especially in the tails).
   tCop = tCopula(param = cop_select$par, dim = 2)
   
-  # Generate RV (number equals the number of returns for both stocks)
-  RVtCopula = rCopula(2*length(returns[,2]),tCop)
+  # Generate RV 
+  RVtCopula = rCopula(N,tCop)
   
   
   m3_sim = data.frame(SP_500 = qnorm(RVtCopula[,1], mean = MLE$MLEmeanGaussian[1], sd = sqrt(MLE$MLEVCVGaussian[1])),
@@ -170,9 +170,9 @@ density_function = function(loss_dist, name, color1, color2){
 
 ## Expected Shortfall
 ES_function = function(loss_dist, VaR){
-  ES = -sapply(list(colSums(loss_dist)[colSums(loss_dist) <= -VaR[1]],
-                    colSums(loss_dist)[colSums(loss_dist) <= -VaR[2]],
-                    colSums(loss_dist)[colSums(loss_dist) <= -VaR[3]]),mean)
+  ES = sapply(list(colSums(loss_dist)[colSums(loss_dist) <= VaR[1]],
+                    colSums(loss_dist)[colSums(loss_dist) <= VaR[2]],
+                    colSums(loss_dist)[colSums(loss_dist) <= VaR[3]]),mean)
   names(ES)  = c("90%", "95%", "99%")
   return(ES)
 }
@@ -180,7 +180,7 @@ ES_function = function(loss_dist, VaR){
 
 ## Plot Functions
 # Density Plot of Y_k Means
-combined_plot = function(name,sim_data, color1, color2){
+combined_plot = function(name,sim_data, color1, color2, ylim_top){
   mean_k = data.frame(mean_Y_k = numeric(N))
   for (i in 1:100){
     mean_k$mean_Y_k[i] = mean(unlist(sim_data[[1]][i]))
@@ -190,7 +190,7 @@ combined_plot = function(name,sim_data, color1, color2){
     geom_density(aes(x = mean_Y_k),color=color1, fill=color2)+
     labs(title=name,x="Mean Y_k", y = "Density")+
     theme(plot.title = element_text(face = "bold", hjust = 0.5)) +
-    xlim(-0.01, 0.01) + ylim(0, 7000)
+    xlim(-0.01, 0.01) + ylim(0, ylim_top)
   
   # d_k for each k
   d_k = data.frame(d_k = unlist(sim_data[[2]]))
@@ -221,6 +221,8 @@ prices = na.locf(prices)
 
 ## Get Weekly Returns
 returns = na.omit(diff(log(prices)))
+returns_xts = returns # for later computation
+
 returns = apply.weekly(returns, function(x) apply(x, 2, sum)) # weekly returns
 
 ## Convert Back to Dataframe
@@ -270,6 +272,7 @@ m1_sim_SP_500_ret = sample(tail(returns$SP_500, length(returns[,1])), N, replace
 m1_sim_SMI_ret = sample(tail(returns$SMI, length(returns[,1])), N, replace = TRUE)
 theta = cbind(m1_sim_SP_500_ret,m1_sim_SMI_ret)
 
+
 a_1 = as.numeric(as.character(unlist(creditportfolio[,7])))
 a_2 = as.numeric(as.character(unlist(creditportfolio[,8])))
 a_k = cbind(a_1,a_2)
@@ -285,7 +288,7 @@ ggplot(m1_sim_df) + geom_histogram(aes(x = Y_k), binwidth = 1)+
   theme(plot.title = element_text(face = "bold", hjust = 0.5))
 
 # Density Plot of Y_k Means / d_k of all k
-combined_plot("M1: Distribution of Y_k Means",m1_simulation,"darkblue","lightblue")
+combined_plot("M1: Distribution of Y_k Means",m1_simulation,"darkblue","lightblue",7000)
 
 # # d_k Density Plot
 # d_k = data.frame(d_k = unlist(m1_simulation[[2]]))
@@ -316,59 +319,12 @@ colnames(bvn) = c("SP_500","SMI")
 m2_simulation = m_simulation(bvn, a_k, lambda_k, e_k, pi_k,N)
 
 # Density Plot of Y_k Means / d_k of all k
-combined_plot("M2: Distribution of Y_k Means",m2_simulation,"indianred4","indianred1")
+combined_plot("M2: Distribution of Y_k Means",m2_simulation,"indianred4","indianred1", 7000)
+
+
 
 ## M3 Gaussian Distribution Simulation
-fbl_m3_sim = function(x,MLE, N) {
-  
-  
-  MLEmeanGaussian = MLE$MLEmeanGaussian
-  MLEVCVGaussian  = MLE$MLEVCVGaussian
-  
-  
-  
-  cop_select = BiCopSelect(pnorm(x[,1], mean = MLE$MLEmeanGaussian[1], sd = sqrt(diag(MLE$MLEVCVGaussian))[1]),
-                           pnorm(x[,2], mean = MLE$MLEmeanGaussian[2], sd = sqrt(diag(MLE$MLEVCVGaussian))[2]),
-                           familyset = 2, selectioncrit = "BIC", method = "mle")
-  
-  # t-copula (since the Gaussian Copula doesn't add enough dependence, especially in the tails).
-  tCop = tCopula(param = cop_select$par, dim = 2)
-  
-  # Generate RV (number equals the number of returns for both stocks)
-  RVtCopula = rCopula(2*length(returns[,2]),tCop)
-  
-  
-  m3_sim = data.frame(SP_500 = qnorm(RVtCopula[,1], mean = MLE$MLEmeanGaussian[1], sd = sqrt(MLE$MLEVCVGaussian[1])),
-                      SMI   = qnorm(RVtCopula[,2], mean = MLE$MLEmeanGaussian[2], sd = sqrt(MLE$MLEVCVGaussian[2])))
-  
-  ## Apply Gaussian Distribution function to Extract (~ Uniform [0,1]) Quantiles
-  m3_sim_uniform = apply(m3_sim, 2, pnorm)
-  
-  
-  ## Apply Quintile Function (Univariate t) to recover Simulated Residuals
-  m3_sim_epsilons = apply(m3_sim_uniform, 2, qt, df = (N-1))
-  
-  
-  ## Plug In Definition to Recover Simulated Returns
-  m3_sim_returns = MLEmeanGaussian + m3_sim_epsilons * sqrt(diag(MLEVCVGaussian))
-  
-  sd_Y_m3 = stan_div_Y(m3_sim_returns)
-  loss_m3 = colSums(loss_function(m3_sim_returns, sd_Y_m3, length(m3_sim_returns[,1])))
-  
-  ## VaR with Full Valuation Method
-  m3_VaR = quantile(-loss_m3, c(0.90, 0.95, 0.99)) 
-  
-  ## ES
-  m3_ES         = -sapply(list(loss_m3[loss_m2 <= -m3_VaR[1]], loss_m3[loss_m3 <= -m3_VaR[2]], loss_m3[loss_m3 <= -m3_VaR[3]]), mean)
-  names(m3_ES)  = c("90%", "95%", "99%")
-  
-  return(list(VaR = m3_VaR, ES = m3_ES, PL = loss_m3, Sim = m3_sim_returns))
-  
-  
-}
-
-
-m3_sim_cop = fbl_m3_sim(returns,MLE,N)
+m3_sim_cop = fbl_m3_sim(returns_xts,MLE,N)
 gauss_dist = m3_sim_cop$Sim
 # gauss_dist = mvtnorm::rmvnorm(N,mu,sigma, method="svd")  # without copula
 colnames(gauss_dist) = c("SP_500","SMI")
@@ -377,7 +333,7 @@ colnames(gauss_dist) = c("SP_500","SMI")
 m3_simulation = m_simulation(gauss_dist, a_k, lambda_k, e_k, pi_k, N)
 
 # Density Plot of Y_k Means / d_k of all k
-combined_plot("M3: Distribution of Y_k Means",m3_simulation,"mediumslateblue","mediumpurple1")
+combined_plot("M3: Distribution of Y_k Means",m3_simulation,"mediumslateblue","mediumpurple1",60)
 
 
 
@@ -402,23 +358,21 @@ density_function(loss_m3, "M3: Portfolio Loss Distribution", "mediumslateblue","
 
 # ===============  (viii) VaR and ES for  M1, M2, M3  ==========================
 ## M1
-m1_VaR = quantile(-colSums(loss_m1), c(0.90, 0.95, 0.99)) # VaR
+m1_VaR = quantile(colSums(loss_m1), c(0.90, 0.95, 0.99999)) # VaR
 m1_ES = ES_function(loss_m1, m1_VaR) #ES
-data.frame(VaR=m1_VaR,ES=m1_ES)
+data.frame(VaR=m1_VaR, ES=m1_ES)
 
 ## M2
-m2_VaR = quantile(-colSums(loss_m2), c(0.90, 0.95, 0.99)) #VaR
+m2_VaR = quantile(colSums(loss_m2), c(0.90, 0.95, 0.99)) #VaR
 m2_ES = ES_function(loss_m2, m2_VaR) #ES
 data.frame(VaR=m2_VaR,ES=m2_ES)
 
 ## M3
-m3_VaR = quantile(-colSums(loss_m3), c(0.90, 0.95, 0.99)) #VaR
+m3_VaR = quantile(colSums(loss_m3), c(0.90, 0.95, 0.99)) #VaR
 m3_ES = ES_function(loss_m3, m3_VaR) #ES
 data.frame(VaR=m3_VaR,ES=m3_ES)
 
 # ================================  (ix)  ======================================
-returns_xts = na.omit(diff(log(prices)))
-
 ## M1
 loss_of_sample = function(x){
   SP_500_sim = sample(tail(x[,1], length(x[,1])), N, replace = TRUE)
