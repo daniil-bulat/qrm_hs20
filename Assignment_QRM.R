@@ -255,6 +255,7 @@ m3_simulation = m_simulation(gauss_dist, a_k, lambda_k, e_k, pi_k, N)
 combined_plot("M3: Distribution of Y_k Means",m3_simulation,"mediumslateblue","mediumpurple1")
 
 
+
 # ===============  (vii) Loss Distributions M1, M2, M3 ========================
 
 ## Loss Function M1
