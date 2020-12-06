@@ -43,7 +43,7 @@ fbl_mle = function(ret) {
 }
 
 
-## Simulation Function
+## Simulation Functions
 m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, N){
   Y_k = matrix(NA,N,1)
   Y_k_list = rep(list(Y_k),100) # List of Y_k simulations
@@ -61,6 +61,79 @@ m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, N){
   return(list(simulation = Y_k_list, d_k = d_k))
 }
 
+fbl_m2_sim = function(MLE) {
+  
+  ## Read in MLEs for mu and sigma
+  MLEmeanGaussian = MLE$MLEmeanGaussian
+  MLEVCVGaussian  = MLE$MLEVCVGaussian
+  
+  ## Simualte bivariate normal
+  m2_sim     = mvrnorm(10000, MLEmeanGaussian, MLEVCVGaussian)
+  #m2_sim_PL  <- fbl_port_PL(Ret_1 = m2_sim[,1], Ret_2 = m2_sim[,2])
+  
+  sd_Y_m2 = stan_div_Y(m2_sim)
+  loss_m2 = colSums(loss_function(m2_sim,sd_Y_m2,length(m2_sim[,1])))
+  
+  
+  ## VaR with Full Valuation Method
+  m2_VaR <- quantile(-loss_m2, c(0.90, 0.95, 0.99)) 
+  
+  
+  ## ES
+  m2_ES         <- -sapply(list(loss_m2[loss_m2 <= -m2_VaR[1]], loss_m2[loss_m2 <= -m2_VaR[2]], loss_m2[loss_m2 <= -m2_VaR[3]]), mean)
+  names(m2_ES)  <- c("90%", "95%", "99%")
+  
+  return(list(VaR = m2_VaR, ES = m2_ES, PL = loss_m2, Sim = m2_sim))
+}
+
+fbl_m3_sim = function(x,MLE, N) {
+  
+  
+  MLEmeanGaussian = MLE$MLEmeanGaussian
+  MLEVCVGaussian  = MLE$MLEVCVGaussian
+  
+  
+  
+  cop_select = BiCopSelect(pnorm(x[,1], mean = MLE$MLEmeanGaussian[1], sd = sqrt(diag(MLE$MLEVCVGaussian))[1]),
+                           pnorm(x[,2], mean = MLE$MLEmeanGaussian[2], sd = sqrt(diag(MLE$MLEVCVGaussian))[2]),
+                           familyset = 2, selectioncrit = "BIC", method = "mle")
+  
+  # t-copula (since the Gaussian Copula doesn't add enough dependence, especially in the tails).
+  tCop = tCopula(param = cop_select$par, dim = 2)
+  
+  # Generate RV (number equals the number of returns for both stocks)
+  RVtCopula = rCopula(2*length(returns[,2]),tCop)
+  
+  
+  m3_sim = data.frame(SP_500 = qnorm(RVtCopula[,1], mean = MLE$MLEmeanGaussian[1], sd = sqrt(MLE$MLEVCVGaussian[1])),
+                      SMI   = qnorm(RVtCopula[,2], mean = MLE$MLEmeanGaussian[2], sd = sqrt(MLE$MLEVCVGaussian[2])))
+  
+  ## Apply Gaussian Distribution function to Extract (~ Uniform [0,1]) Quantiles
+  m3_sim_uniform = apply(m3_sim, 2, pnorm)
+  
+  
+  ## Apply Quintile Function (Univariate t) to recover Simulated Residuals
+  m3_sim_epsilons = apply(m3_sim_uniform, 2, qt, df = (N-1))
+  
+  
+  ## Plug In Definition to Recover Simulated Returns
+  m3_sim_returns = MLEmeanGaussian + m3_sim_epsilons * sqrt(diag(MLEVCVGaussian))
+  
+  sd_Y_m3 = stan_div_Y(m3_sim_returns)
+  loss_m3 = colSums(loss_function(m3_sim_returns, sd_Y_m3, length(m3_sim_returns[,1])))
+  
+  ## VaR with Full Valuation Method
+  m3_VaR = quantile(-loss_m3, c(0.90, 0.95, 0.99)) 
+  
+  ## ES
+  m3_ES         = -sapply(list(loss_m3[loss_m2 <= -m3_VaR[1]], loss_m3[loss_m3 <= -m3_VaR[2]], loss_m3[loss_m3 <= -m3_VaR[3]]), mean)
+  names(m3_ES)  = c("90%", "95%", "99%")
+  
+  return(list(VaR = m3_VaR, ES = m3_ES, PL = loss_m3, Sim = m3_sim_returns))
+  
+  
+}
+
 
 ## Function of Standard Deviation of Y_k
 stan_div_Y = function(sim_par){
@@ -73,7 +146,7 @@ stan_div_Y = function(sim_par){
 
 
 ## Portfolio Loss Function
-loss_function = function(sim_par, sd_Y){
+loss_function = function(sim_par, sd_Y, N){
   loss = matrix(NA,100,N)
   for (i in 1:N){
     cond_prob_def = pnorm((creditportfolio$pi_k - sqrt(creditportfolio$lambda_k) *
@@ -224,6 +297,7 @@ combined_plot("M1: Distribution of Y_k Means",m1_simulation,"darkblue","lightblu
 # ============================== (vi) Simulation M2, M3 =======================
 ## M2 Bivariate Gaussian Simulation
 # Target parameters for univariate normal distributions
+
 mu1 = MLE$MLEmeanGaussian[1]; s1 = sqrt(MLE$MLEVCVGaussian[1])
 mu2 = MLE$MLEmeanGaussian[2]; s2 = sqrt(MLE$MLEVCVGaussian[4])
 rho = MLE$MLEVCVGaussian[3] / (s1*s2)
@@ -245,7 +319,58 @@ m2_simulation = m_simulation(bvn, a_k, lambda_k, e_k, pi_k,N)
 combined_plot("M2: Distribution of Y_k Means",m2_simulation,"indianred4","indianred1")
 
 ## M3 Gaussian Distribution Simulation
-gauss_dist = mvtnorm::rmvnorm(N,mu,sigma, method="svd")
+fbl_m3_sim = function(x,MLE, N) {
+  
+  
+  MLEmeanGaussian = MLE$MLEmeanGaussian
+  MLEVCVGaussian  = MLE$MLEVCVGaussian
+  
+  
+  
+  cop_select = BiCopSelect(pnorm(x[,1], mean = MLE$MLEmeanGaussian[1], sd = sqrt(diag(MLE$MLEVCVGaussian))[1]),
+                           pnorm(x[,2], mean = MLE$MLEmeanGaussian[2], sd = sqrt(diag(MLE$MLEVCVGaussian))[2]),
+                           familyset = 2, selectioncrit = "BIC", method = "mle")
+  
+  # t-copula (since the Gaussian Copula doesn't add enough dependence, especially in the tails).
+  tCop = tCopula(param = cop_select$par, dim = 2)
+  
+  # Generate RV (number equals the number of returns for both stocks)
+  RVtCopula = rCopula(2*length(returns[,2]),tCop)
+  
+  
+  m3_sim = data.frame(SP_500 = qnorm(RVtCopula[,1], mean = MLE$MLEmeanGaussian[1], sd = sqrt(MLE$MLEVCVGaussian[1])),
+                      SMI   = qnorm(RVtCopula[,2], mean = MLE$MLEmeanGaussian[2], sd = sqrt(MLE$MLEVCVGaussian[2])))
+  
+  ## Apply Gaussian Distribution function to Extract (~ Uniform [0,1]) Quantiles
+  m3_sim_uniform = apply(m3_sim, 2, pnorm)
+  
+  
+  ## Apply Quintile Function (Univariate t) to recover Simulated Residuals
+  m3_sim_epsilons = apply(m3_sim_uniform, 2, qt, df = (N-1))
+  
+  
+  ## Plug In Definition to Recover Simulated Returns
+  m3_sim_returns = MLEmeanGaussian + m3_sim_epsilons * sqrt(diag(MLEVCVGaussian))
+  
+  sd_Y_m3 = stan_div_Y(m3_sim_returns)
+  loss_m3 = colSums(loss_function(m3_sim_returns, sd_Y_m3, length(m3_sim_returns[,1])))
+  
+  ## VaR with Full Valuation Method
+  m3_VaR = quantile(-loss_m3, c(0.90, 0.95, 0.99)) 
+  
+  ## ES
+  m3_ES         = -sapply(list(loss_m3[loss_m2 <= -m3_VaR[1]], loss_m3[loss_m3 <= -m3_VaR[2]], loss_m3[loss_m3 <= -m3_VaR[3]]), mean)
+  names(m3_ES)  = c("90%", "95%", "99%")
+  
+  return(list(VaR = m3_VaR, ES = m3_ES, PL = loss_m3, Sim = m3_sim_returns))
+  
+  
+}
+
+
+m3_sim_cop = fbl_m3_sim(returns,MLE,N)
+gauss_dist = m3_sim_cop$Sim
+# gauss_dist = mvtnorm::rmvnorm(N,mu,sigma, method="svd")  # without copula
 colnames(gauss_dist) = c("SP_500","SMI")
 
 # M3 Simulation of Y_k's
@@ -260,18 +385,18 @@ combined_plot("M3: Distribution of Y_k Means",m3_simulation,"mediumslateblue","m
 
 ## Loss Function M1
 sd_Y_m1 = stan_div_Y(theta)
-loss_m1 = loss_function(theta,sd_Y_m1)
+loss_m1 = loss_function(theta,sd_Y_m1, N)
 density_function(loss_m1, "M1: Portfolio Loss Distribution", "darkblue","lightblue")
 
 
 ## Loss Function M2
 sd_Y_m2 = stan_div_Y(bvn)
-loss_m2 = loss_function(bvn,sd_Y_m2)
+loss_m2 = loss_function(bvn,sd_Y_m2, N)
 density_function(loss_m2, "M2: Portfolio Loss Distribution", "indianred4","indianred1")
 
 ## Loss Function M3
 sd_Y_m3 = stan_div_Y(gauss_dist)
-loss_m3 = loss_function(gauss_dist,sd_Y_m3)
+loss_m3 = loss_function(gauss_dist,sd_Y_m3, N)
 density_function(loss_m3, "M3: Portfolio Loss Distribution", "mediumslateblue","mediumpurple1")
 
 
@@ -293,6 +418,7 @@ data.frame(VaR=m3_VaR,ES=m3_ES)
 
 # ================================  (ix)  ======================================
 returns_xts = na.omit(diff(log(prices)))
+
 ## M1
 loss_of_sample = function(x){
   SP_500_sim = sample(tail(x[,1], length(x[,1])), N, replace = TRUE)
@@ -300,7 +426,7 @@ loss_of_sample = function(x){
   theta = cbind(SP_500_sim,SMI_sim)
   
   sd_Y_m1 = stan_div_Y(theta)
-  loss_m1 = loss_function(theta,sd_Y_m1)
+  loss_m1 = loss_function(theta,sd_Y_m1,N)
   return(colSums(loss_m1))
 }
 
@@ -326,7 +452,7 @@ rolling_VaR_m1 = function(x){
 roll_var_m1 = rollapply(returns_xts,500,rolling_VaR_m1, by.column = F)
 names(roll_var_m1) = "M1"
 
-## M2: Simulate Bivariate Normal distribution based on MLE
+## M2
 fbl_m2_sim = function(MLE) {
   
   ## Read in MLEs for mu and sigma
@@ -338,7 +464,7 @@ fbl_m2_sim = function(MLE) {
   #m2_sim_PL  <- fbl_port_PL(Ret_1 = m2_sim[,1], Ret_2 = m2_sim[,2])
   
   sd_Y_m2 = stan_div_Y(m2_sim)
-  loss_m2 = colSums(loss_function(m2_sim,sd_Y_m2))
+  loss_m2 = colSums(loss_function(m2_sim,sd_Y_m2,length(m2_sim[,1])))
   
   
   ## VaR with Full Valuation Method
@@ -351,21 +477,27 @@ fbl_m2_sim = function(MLE) {
   
   return(list(VaR = m2_VaR, ES = m2_ES, PL = loss_m2, Sim = m2_sim))
 }
-fbl_m3_sim = function(MLE, N) {
+fbl_m3_sim = function(x,MLE, N) {
   
   
   MLEmeanGaussian = MLE$MLEmeanGaussian
   MLEVCVGaussian  = MLE$MLEVCVGaussian
   
   
-  ## Cholesky Decomposition of Correlation Matrix MLE
-  cholesky  = chol(cov2cor(MLEVCVGaussian))
   
-  ## Use the Resulting Triangular Matrix to produce Multivariate Normal Pseudo Random Numbers
-  ## With desired dependence structure (i.e. Gaussian Copula with MLE Correlation)
-  m3_sim    = matrix(rnorm(20000), 10000, 2) %*% (cholesky)
-  sd_Y_m3 = stan_div_Y(m3_sim)
-  loss_m3 = colSums(loss_function(m3_sim, sd_Y_m3))
+  cop_select = BiCopSelect(pnorm(x[,1], mean = MLE$MLEmeanGaussian[1], sd = sqrt(diag(MLE$MLEVCVGaussian))[1]),
+                           pnorm(x[,2], mean = MLE$MLEmeanGaussian[2], sd = sqrt(diag(MLE$MLEVCVGaussian))[2]),
+                           familyset = 2, selectioncrit = "BIC", method = "mle")
+  
+  # t-copula (since the Gaussian Copula doesn't add enough dependence, especially in the tails).
+  tCop = tCopula(param = cop_select$par, dim = 2)
+  
+  # Generate RV (number equals the number of returns for both stocks)
+  RVtCopula = rCopula(2*length(returns[,2]),tCop)
+  
+  
+  m3_sim = data.frame(SP_500 = qnorm(RVtCopula[,1], mean = MLE$MLEmeanGaussian[1], sd = sqrt(MLE$MLEVCVGaussian[1])),
+                      SMI   = qnorm(RVtCopula[,2], mean = MLE$MLEmeanGaussian[2], sd = sqrt(MLE$MLEVCVGaussian[2])))
   
   ## Apply Gaussian Distribution function to Extract (~ Uniform [0,1]) Quantiles
   m3_sim_uniform = apply(m3_sim, 2, pnorm)
@@ -377,14 +509,16 @@ fbl_m3_sim = function(MLE, N) {
   
   ## Plug In Definition to Recover Simulated Returns
   m3_sim_returns = MLEmeanGaussian + m3_sim_epsilons * sqrt(diag(MLEVCVGaussian))
-
+  
+  sd_Y_m3 = stan_div_Y(m3_sim_returns)
+  loss_m3 = colSums(loss_function(m3_sim_returns, sd_Y_m3, length(m3_sim_returns[,1])))
   
   ## VaR with Full Valuation Method
   m3_VaR = quantile(-loss_m3, c(0.90, 0.95, 0.99)) 
   
   ## ES
-  m3_ES         = -sapply(list(loss_m2[loss_m2 <= -m2_VaR[1]], loss_m2[loss_m2 <= -m2_VaR[2]], loss_m2[loss_m2 <= -m2_VaR[3]]), mean)
-  names(m2_ES)  = c("90%", "95%", "99%")
+  m3_ES         = -sapply(list(loss_m3[loss_m2 <= -m3_VaR[1]], loss_m3[loss_m3 <= -m3_VaR[2]], loss_m3[loss_m3 <= -m3_VaR[3]]), mean)
+  names(m3_ES)  = c("90%", "95%", "99%")
   
   return(list(VaR = m3_VaR, ES = m3_ES, PL = loss_m3, Sim = m3_sim))
   
@@ -421,7 +555,7 @@ rolling_VaR_simple = function(x){
   
   ## Simulate and extract VaRs for sample:
   m2_var = fbl_m2_sim(MLE_roll)
-  m3_var = fbl_m3_sim(MLE_roll, N = nrow(x)) #####!!!!!
+  m3_var = fbl_m3_sim(x, MLE_roll, N = nrow(x)) #####!!!!!
   
   ## Collect and return outputs in list
   return(cbind(VaR_m2 = m2_var$VaR[2], VaR_m3 = m3_var$VaR[2]))
@@ -439,7 +573,7 @@ roll_var_lagged = lag.xts(roll_var_m1,-1)
 
 ## Create time series object holding Loss values and sync up the VaR
 VaR_compare = roll_var_lagged
-colnames(VaR_compare) = c("VaR_M1","VaR_M2","VaR_M3")
+colnames(VaR_compare) = c("VaR 95% M1","VaR 95% M2","VaR 95% M3")
 
 ## Plot
 autoplot(VaR_compare)
