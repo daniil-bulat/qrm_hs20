@@ -64,7 +64,7 @@ m_simulation = function(theta, a_k, lambda_k, e_k, pi_k, N){
 
 ## Function of Standard Deviation of Y_k
 stan_div_Y = function(sim_par){
-  sd_k = matrix(NA,100,1)
+  sd_Y = matrix(NA,100,1)
   for (j in 1:100){
     sd_Y[j] = sqrt(a_k[j,] %*% cov(sim_par) %*% a_k[j,])
   }
@@ -97,9 +97,9 @@ density_function = function(loss_dist, name, color1, color2){
 
 ## Expected Shortfall
 ES_function = function(loss_dist, VaR){
-  ES = -sapply(list(colMeans(loss_dist)[colMeans(loss_dist) <= -VaR[1]],
-                               colMeans(loss_dist)[colMeans(loss_dist) <= -VaR[2]],
-                               colMeans(loss_dist)[colMeans(loss_dist) <= -VaR[3]]),mean)
+  ES = -sapply(list(colSums(loss_dist)[colSums(loss_dist) <= -VaR[1]],
+                    colSums(loss_dist)[colSums(loss_dist) <= -VaR[2]],
+                    colSums(loss_dist)[colSums(loss_dist) <= -VaR[3]]),mean)
   names(ES)  = c("90%", "95%", "99%")
   return(ES)
 }
@@ -277,21 +277,22 @@ density_function(loss_m3, "M3: Portfolio Loss Distribution", "mediumslateblue","
 
 # ===============  (viii) VaR and ES for  M1, M2, M3  ==========================
 ## M1
-m1_VaR = quantile(-colMeans(loss_m1), c(0.90, 0.95, 0.99)) # VaR
+m1_VaR = quantile(-colSums(loss_m1), c(0.90, 0.95, 0.99)) # VaR
 m1_ES = ES_function(loss_m1, m1_VaR) #ES
 data.frame(VaR=m1_VaR,ES=m1_ES)
 
 ## M2
-m2_VaR = quantile(-colMeans(loss_m2), c(0.90, 0.95, 0.99)) #VaR
+m2_VaR = quantile(-colSums(loss_m2), c(0.90, 0.95, 0.99)) #VaR
 m2_ES = ES_function(loss_m2, m2_VaR) #ES
 data.frame(VaR=m2_VaR,ES=m2_ES)
 
 ## M3
-m3_VaR = quantile(-colMeans(loss_m3), c(0.90, 0.95, 0.99)) #VaR
+m3_VaR = quantile(-colSums(loss_m3), c(0.90, 0.95, 0.99)) #VaR
 m3_ES = ES_function(loss_m3, m3_VaR) #ES
 data.frame(VaR=m3_VaR,ES=m3_ES)
 
 # ================================  (ix)  ======================================
+returns_xts = na.omit(diff(log(prices)))
 ## M1
 loss_of_sample = function(x){
   SP_500_sim = sample(tail(x[,1], length(x[,1])), N, replace = TRUE)
@@ -301,9 +302,6 @@ loss_of_sample = function(x){
   sd_Y_m1 = stan_div_Y(theta)
   loss_m1 = loss_function(theta,sd_Y_m1)
   return(colSums(loss_m1))
-  
-  m2_VaR = quantile(-colMeans(loss_m2), c(0.90, 0.95, 0.99)) #VaR
-  
 }
 
 
@@ -324,13 +322,11 @@ rolling_VaR_m1 = function(x){
   return(VaR_m1 = m1_var)
 }
 
-## Roll over the whole sample using a window of 200 observations, returning time series object of VaR of both models for each day
+## Roll over the whole sample using a window of 500 observations, returning time series object of VaR for M1
 roll_var_m1 = rollapply(returns_xts,500,rolling_VaR_m1, by.column = F)
-
-
+names(roll_var_m1) = "M1"
 
 ## M2: Simulate Bivariate Normal distribution based on MLE
-returns_xts = na.omit(diff(log(prices)))
 fbl_m2_sim = function(MLE) {
   
   ## Read in MLEs for mu and sigma
@@ -377,26 +373,36 @@ rolling_VaR_simple <- function(x){
   sample_series <- na.remove(x)
   
   ## Calculate MLE for mu and sigma of series:
-  MLE_roll <- mle_of_sample(as.data.frame(sample_series))
+  MLE_roll = mle_of_sample(as.data.frame(sample_series))
   if(is.null(MLE_roll)) return(NA)
   
   ## Simulate and extract VaRs for sample:
-  m2_var <- fbl_m2_sim(MLE_roll)
-  m4_var <- fbl_m4_sim(MLE_roll, N = nrow(x))
+  m2_var = fbl_m2_sim(MLE_roll)
+  m3_var = fbl_m4_sim(MLE_roll, N = nrow(x)) #####!!!!!
   
   ## Collect and return outputs in list
-  return(cbind(VaR_m2 = m2_var$VaR[2], VaR_m4 = m4_var$VaR[2]))
+  return(cbind(VaR_m2 = m2_var$VaR[2], VaR_m3 = m3_var$VaR[2]))
 }
 
 ## Roll over the whole sample using a window of 200 observations, returning time series object of VaR of both models for each day
 roll_var_simple = rollapply(returns_xts,500,rolling_VaR_simple, by.column = F)
+names(roll_var_simple) = c("M2","M3")
 
+roll_var_m1$M2 = roll_var_simple$M2
+roll_var_m1$M3 = roll_var_simple$M3
 ## Since the VaRs are valid for the next day, we have to lag the VaR series for one period to sync up VaRs
-roll_var_simple_lagged = lag.xts(roll_var_simple,-1)
+roll_var_lagged = lag.xts(roll_var_m1,-1)
 
 ## Create time series object holding Loss values and sync up the VaR and Loss series
-VaR_compare <- roll_var_simple_lagged
-colnames(VaR_compare) <- c("VaR_M1")
+VaR_compare = roll_var_lagged
+colnames(VaR_compare) = c("VaR_M1","VaR_M2","VaR_M3")
 
 ## Plot
 autoplot(VaR_compare)
+
+
+
+
+
+
+
