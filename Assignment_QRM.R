@@ -160,12 +160,17 @@ loss_function = function(sim_par, sd_Y, N){
 
 ## Density Function of Loss
 density_function = function(loss_dist, name, color1, color2){
-  l = data.frame(s = colSums(loss_dist))
-  ggplot(l) + #geom_histogram(aes(x = s))+
-    geom_density(aes(x = s),color=color1, fill=color2)+
-    labs(title=name,x="Loss in USD", y = "Density")+
-    theme(plot.title = element_text(face = "bold", hjust = 0.5))
+  d = density(loss_dist)
+  plot(d, main=name, xlab("Loss in USD"))
+  polygon(d, col=color2, border=color1)
+
 }
+
+
+d = density(loss_dist)
+plot(d, main=name, xlab("Loss in USD"))
+polygon(d, col=color2, border=color1)
+
 
 
 ## Expected Shortfall
@@ -343,7 +348,6 @@ combined_plot("M3: Distribution of Y_k Means",m3_simulation,"mediumslateblue","m
 sd_Y_m1 = stan_div_Y(theta)
 loss_m1 = loss_function(theta,sd_Y_m1, N)
 density_function(loss_m1, "M1: Portfolio Loss Distribution", "darkblue","lightblue")
-
 
 ## Loss Function M2
 sd_Y_m2 = stan_div_Y(bvn)
