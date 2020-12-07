@@ -398,7 +398,7 @@ rolling_VaR_m1 = function(x){
   if(is.null(loss_roll)) return(NA)
   
   ## Simulate and extract VaRs for sample:
-  m1_var = quantile(-loss_roll, 0.95)
+  m1_var = quantile(loss_roll, 0.95)
   
   ## Collect and return outputs in list
   return(VaR_m1 = m1_var)
@@ -424,11 +424,13 @@ fbl_m2_sim = function(MLE) {
   
   
   ## VaR with Full Valuation Method
-  m2_VaR <- quantile(-loss_m2, c(0.90, 0.95, 0.99)) 
+  m2_VaR <- quantile(loss_m2, c(0.90, 0.95, 0.99)) 
   
   
   ## ES
-  m2_ES         <- -sapply(list(loss_m2[loss_m2 <= -m2_VaR[1]], loss_m2[loss_m2 <= -m2_VaR[2]], loss_m2[loss_m2 <= -m2_VaR[3]]), mean)
+  m2_ES         <- sapply(list(loss_m2[loss_m2 <= m2_VaR[1]],
+                               loss_m2[loss_m2 <= m2_VaR[2]],
+                               loss_m2[loss_m2 <= m2_VaR[3]]), mean)
   names(m2_ES)  <- c("90%", "95%", "99%")
   
   return(list(VaR = m2_VaR, ES = m2_ES, PL = loss_m2, Sim = m2_sim))
@@ -470,10 +472,12 @@ fbl_m3_sim = function(x,MLE, N) {
   loss_m3 = colSums(loss_function(m3_sim_returns, sd_Y_m3, length(m3_sim_returns[,1])))
   
   ## VaR with Full Valuation Method
-  m3_VaR = quantile(-loss_m3, c(0.90, 0.95, 0.99)) 
+  m3_VaR = quantile(loss_m3, c(0.90, 0.95, 0.99)) 
   
   ## ES
-  m3_ES         = -sapply(list(loss_m3[loss_m2 <= -m3_VaR[1]], loss_m3[loss_m3 <= -m3_VaR[2]], loss_m3[loss_m3 <= -m3_VaR[3]]), mean)
+  m3_ES         = sapply(list(loss_m3[loss_m2 <= m3_VaR[1]],
+                               loss_m3[loss_m3 <= m3_VaR[2]],
+                               loss_m3[loss_m3 <= m3_VaR[3]]), mean)
   names(m3_ES)  = c("90%", "95%", "99%")
   
   return(list(VaR = m3_VaR, ES = m3_ES, PL = loss_m3, Sim = m3_sim))
