@@ -167,12 +167,6 @@ density_function = function(loss_dist, name, color1, color2){
 }
 
 
-d = density(loss_dist)
-plot(d, main=name, xlab("Loss in USD"))
-polygon(d, col=color2, border=color1)
-
-
-
 ## Expected Shortfall
 ES_function = function(loss_dist, VaR){
   ES = sapply(list(colSums(loss_dist)[colSums(loss_dist) <= VaR[1]],
@@ -201,7 +195,7 @@ combined_plot = function(name,sim_data, color1, color2, ylim_top){
   d_k = data.frame(d_k = unlist(sim_data[[2]]))
   dist_dk = ggplot(d_k) + geom_line(aes(x=1:100, y=d_k), color=color1)+
     geom_point(aes(x=1:100, y=d_k, group=1))+
-    labs(title="d_k for each k",x="d_k", y = "Density")+
+    labs(title="d_k for each k",x="d_k", y = "Value")+
     theme(plot.title = element_text(face = "bold", hjust = 0.5))
   
   
@@ -209,6 +203,10 @@ combined_plot = function(name,sim_data, color1, color2, ylim_top){
   ggarrange(dist_mean_Y_k, dist_dk + rremove("x.text"),
             ncol = 1, nrow = 2)
 }
+
+
+
+
 
 # ============================== Data =========================================
 ## Working Directory Setting
